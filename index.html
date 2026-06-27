@@ -276,6 +276,37 @@
   .rev-row .q { font-weight: 700; flex: 1; }
   .rev-row .ans { color: #555; font-size: 14px; }
 
+  /* ---------- Question catalog ---------- */
+  .catalog-toggle {
+    display: block;
+    width: 100%;
+    margin-top: 12px;
+    padding: 12px;
+    border: 2px solid #ddd;
+    border-radius: 10px;
+    background: #fff;
+    color: #555;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .catalog-toggle:hover { border-color: #bbb; }
+  .catalog { margin-top: 14px; overflow-x: auto; }
+  .cat-block { margin-bottom: 22px; }
+  .cat-block h4 {
+    font-size: 15px; color: #333; margin-bottom: 8px;
+    display: flex; align-items: baseline; gap: 8px;
+  }
+  .cat-sum { font-size: 12px; font-weight: 600; color: var(--purple); }
+  .cat-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 420px; }
+  .cat-table th, .cat-table td { padding: 6px 8px; text-align: center; border-bottom: 1px solid #eee; }
+  .cat-table thead th { color: #888; font-size: 12px; text-transform: uppercase; letter-spacing: .3px; }
+  .cat-table tbody th { text-align: left; font-weight: 700; color: #333; white-space: nowrap; }
+  .cat-table td { color: #555; }
+  .cat-table td.tot { font-weight: 800; color: var(--ink); }
+  .cat-table tr.foot th, .cat-table tr.foot td { border-top: 2px solid #ddd; font-weight: 800; color: var(--ink); }
+  .cat-note { font-size: 12px; color: #888; line-height: 1.5; margin-top: -6px; }
+
   .hidden { display: none !important; }
 </style>
 </head>
@@ -312,9 +343,10 @@
     <div class="field">
       <label class="h">Question type <span class="hint">— computation vs. conceptual reasoning</span></label>
       <div class="opts" id="qtype">
-        <div class="opt sel" data-qtype="numeric">Numerical only <span class="sub">computation</span></div>
-        <div class="opt" data-qtype="concept">Conceptual only <span class="sub">definitions &amp; reasoning</span></div>
-        <div class="opt" data-qtype="both">Both <span class="sub">mixed</span></div>
+        <div class="opt sel" data-qtype="numeric">Numerical <span class="sub">computation</span></div>
+        <div class="opt" data-qtype="concept">Conceptual <span class="sub">definitions &amp; reasoning</span></div>
+        <div class="opt" data-qtype="truefalse">True / False <span class="sub">judge a statement</span></div>
+        <div class="opt" data-qtype="both">Mixed <span class="sub">all types</span></div>
       </div>
     </div>
 
@@ -365,6 +397,9 @@
     </div>
 
     <button id="startBtn" class="btn-primary">Start game</button>
+
+    <button id="catalogToggle" class="catalog-toggle" type="button">📊 Show question catalog</button>
+    <div id="catalog" class="catalog hidden"><div id="catalogBody"></div></div>
   </div>
 
   <!-- ============ GAME ============ -->
@@ -473,7 +508,7 @@
 
   function validate() {
     // need a numerical topic unless running conceptual-only
-    $("startBtn").disabled = cfg.topics.length === 0 && cfg.conceptual !== "concept";
+    $("startBtn").disabled = cfg.topics.length === 0 && cfg.conceptual !== "concept" && cfg.conceptual !== "truefalse";
   }
 
   // ============================================================
@@ -510,7 +545,8 @@
   }
   // each generator builds an array V of variant thunks valid for the level,
   // then one is picked at random — this is where per-level variety lives.
-  function build(sub, V) { return Object.assign(pick(V)(), { sub: sub }); }
+  let _lastVariantCount = 0;
+  function build(sub, V) { _lastVariantCount = new Set(V).size; return Object.assign(pick(V)(), { sub: sub }); }
 
   // ---- Arithmetic ----
   function gArith(L) {
@@ -1022,6 +1058,103 @@
     return all.length ? all : CONCEPT_BANK;
   }
 
+  // ---- True / False statements — tagged by topic (t) and level (L). a is the
+  //      correct verdict ("True" or "False"). Presented as a 2-choice question. ----
+  const TRUEFALSE_BANK = [
+    // arithmetic
+    { L: 1, t: "arithmetic", q: "7 + 8 = 15", a: "True" },
+    { L: 1, t: "arithmetic", q: "8 + 5 = 14", a: "False" },
+    { L: 1, t: "arithmetic", q: "9 × 3 = 27", a: "True" },
+    { L: 2, t: "arithmetic", q: "6 × 7 = 48", a: "False" },
+    { L: 2, t: "arithmetic", q: "12 × 12 = 144", a: "True" },
+    { L: 2, t: "arithmetic", q: "100 − 37 = 53", a: "False" },
+    { L: 2, t: "arithmetic", q: "Zero is neither positive nor negative.", a: "True" },
+    { L: 3, t: "arithmetic", q: "The product of two negative numbers is positive.", a: "True" },
+    // fractions
+    { L: 1, t: "fractions", q: "1/2 is greater than 1/3.", a: "True" },
+    { L: 2, t: "fractions", q: "50% is equal to 1/2.", a: "True" },
+    { L: 2, t: "fractions", q: "3/4 = 0.75", a: "True" },
+    { L: 2, t: "fractions", q: "1/4 is larger than 1/3.", a: "False" },
+    { L: 2, t: "fractions", q: "2/3 = 0.6", a: "False" },
+    { L: 3, t: "fractions", q: "To divide by a fraction, multiply by its reciprocal.", a: "True" },
+    { L: 3, t: "fractions", q: "25% of 80 is 20.", a: "True" },
+    { L: 3, t: "fractions", q: "10% of 250 is 2.5.", a: "False" },
+    // algebra
+    { L: 1, t: "algebra", q: "If x + 4 = 10, then x = 6.", a: "True" },
+    { L: 2, t: "algebra", q: "If 3x = 21, then x = 6.", a: "False" },
+    { L: 2, t: "algebra", q: "The slope of a horizontal line is 0.", a: "True" },
+    { L: 3, t: "algebra", q: "The slope of a vertical line is 0.", a: "False" },
+    { L: 3, t: "algebra", q: "(a + b)² = a² + b²", a: "False" },
+    { L: 3, t: "algebra", q: "Parallel lines have equal slopes.", a: "True" },
+    { L: 4, t: "algebra", q: "i² = −1, where i is the imaginary unit.", a: "True" },
+    { L: 5, t: "algebra", q: "A matrix with determinant 0 has no inverse.", a: "True" },
+    { L: 5, t: "algebra", q: "The complex conjugate of 2 + 3i is 2 − 3i.", a: "True" },
+    // exponents
+    { L: 2, t: "exponents", q: "2³ = 8", a: "True" },
+    { L: 2, t: "exponents", q: "3² = 6", a: "False" },
+    { L: 2, t: "exponents", q: "5⁰ = 1", a: "True" },
+    { L: 3, t: "exponents", q: "√64 = 8", a: "True" },
+    { L: 3, t: "exponents", q: "x² · x³ = x⁶", a: "False" },
+    { L: 5, t: "exponents", q: "log₂(8) = 3", a: "True" },
+    { L: 5, t: "exponents", q: "log(a · b) = log a + log b", a: "True" },
+    // geometry
+    { L: 1, t: "geometry", q: "A triangle's interior angles sum to 180°.", a: "True" },
+    { L: 1, t: "geometry", q: "A hexagon has five sides.", a: "False" },
+    { L: 1, t: "geometry", q: "A circle has corners.", a: "False" },
+    { L: 2, t: "geometry", q: "The area of a rectangle is length × width.", a: "True" },
+    { L: 2, t: "geometry", q: "A right angle measures 90°.", a: "True" },
+    { L: 3, t: "geometry", q: "In a right triangle, a² + b² = c² (Pythagorean theorem).", a: "True" },
+    { L: 4, t: "geometry", q: "The circumference of a circle is πr².", a: "False" },
+    { L: 5, t: "geometry", q: "The volume of a sphere is (4/3)πr³.", a: "True" },
+    // number theory
+    { L: 1, t: "numbertheory", q: "7 is a prime number.", a: "True" },
+    { L: 2, t: "numbertheory", q: "9 is a prime number.", a: "False" },
+    { L: 2, t: "numbertheory", q: "2 is the only even prime number.", a: "True" },
+    { L: 2, t: "numbertheory", q: "1 is a prime number.", a: "False" },
+    { L: 3, t: "numbertheory", q: "51 is a prime number.", a: "False" },
+    { L: 5, t: "numbertheory", q: "√2 is irrational.", a: "True" },
+    { L: 5, t: "numbertheory", q: "Every even number is divisible by 4.", a: "False" },
+    // statistics
+    { L: 2, t: "statistics", q: "The median is the middle value of an ordered data set.", a: "True" },
+    { L: 2, t: "statistics", q: "The mean of {2, 4, 6} is 4.", a: "True" },
+    { L: 3, t: "statistics", q: "A probability can be greater than 1.", a: "False" },
+    { L: 3, t: "statistics", q: "The mean always equals the median.", a: "False" },
+    { L: 3, t: "statistics", q: "The mode is the most frequent value in a data set.", a: "True" },
+    { L: 5, t: "statistics", q: "Standard deviation is the square root of the variance.", a: "True" },
+    // sequences
+    { L: 2, t: "sequences", q: "In an arithmetic sequence, consecutive terms differ by a constant.", a: "True" },
+    { L: 2, t: "sequences", q: "After 2, 4, 6, 8 the next term is 10.", a: "True" },
+    { L: 3, t: "sequences", q: "A geometric sequence has a constant difference between terms.", a: "False" },
+    { L: 5, t: "sequences", q: "An infinite geometric series with |r| < 1 converges.", a: "True" },
+    // trigonometry
+    { L: 2, t: "trigonometry", q: "sin(30°) = 1/2", a: "True" },
+    { L: 3, t: "trigonometry", q: "cos(0°) = 0", a: "False" },
+    { L: 3, t: "trigonometry", q: "tan(45°) = 1", a: "True" },
+    { L: 4, t: "trigonometry", q: "sin²θ + cos²θ = 1", a: "True" },
+    { L: 5, t: "trigonometry", q: "The period of sin(x) is π.", a: "False" },
+    // calculus
+    { L: 3, t: "calculus", q: "The derivative of a constant is 0.", a: "True" },
+    { L: 3, t: "calculus", q: "The derivative of x² is 2x.", a: "True" },
+    { L: 4, t: "calculus", q: "The derivative of sin x is −cos x.", a: "False" },
+    { L: 4, t: "calculus", q: "Integration is the reverse of differentiation.", a: "True" },
+    { L: 5, t: "calculus", q: "The derivative of eˣ is eˣ.", a: "True" },
+    { L: 5, t: "calculus", q: "∫ x dx = x²/2 + C", a: "True" },
+  ];
+
+  // Same level-band + topic-scoping logic as conceptPool, over the T/F bank.
+  function truefalsePool(L) {
+    const band = TRUEFALSE_BANK.filter((e) => e.L === L || e.L === L - 1);
+    if (cfg.topics.length) {
+      const bandT = band.filter((e) => cfg.topics.includes(e.t));
+      if (bandT.length >= 3) return bandT;
+      const allT = TRUEFALSE_BANK.filter((e) => e.L <= L && cfg.topics.includes(e.t));
+      if (allT.length >= 3) return allT;
+    }
+    if (band.length >= 3) return band;
+    const all = TRUEFALSE_BANK.filter((e) => e.L <= L);
+    return all.length ? all : TRUEFALSE_BANK;
+  }
+
   const GEN = {
     arithmetic: gArith, fractions: gFrac, algebra: gAlg, exponents: gExp,
     geometry: gGeo, numbertheory: gNum, statistics: gStat, sequences: gSeq,
@@ -1042,8 +1175,9 @@
   // exhausted), so identical concept questions never repeat unless the count
   // exceeds the available pool. Numeric questions retry on duplicate text.
   let _cQueue = [];
+  let _tfQueue = [];
   let _usedTexts = new Set();
-  function resetGenState() { _cQueue = []; _usedTexts = new Set(); }
+  function resetGenState() { _cQueue = []; _tfQueue = []; _usedTexts = new Set(); }
   function nextConcept(L) {
     _cQueue = _cQueue.filter(e => !_usedTexts.has(e.q));
     if (!_cQueue.length) {
@@ -1056,18 +1190,32 @@
     q._topic = "concepts";
     return q;
   }
+  // True/False questions: 2 fixed options, no-repeat queue (mirrors nextConcept).
+  // Bypasses finalize() since the choices are always exactly True and False.
+  function nextTrueFalse(L) {
+    _tfQueue = _tfQueue.filter(e => !_usedTexts.has(e.q));
+    if (!_tfQueue.length) {
+      const pool = truefalsePool(L);
+      const unused = pool.filter(e => !_usedTexts.has(e.q));
+      _tfQueue = shuffle(unused.length ? unused : pool);
+    }
+    const e = _tfQueue.shift() || pick(TRUEFALSE_BANK);
+    return { text: e.q, answer: e.a, options: ["True", "False"], sub: "True / False", _topic: e.t, _tf: true };
+  }
   // Generate one question at level L, honoring the numeric/conceptual/both setting.
   function generateOne(L) {
-    let useConcept;
-    if (cfg.conceptual === "concept") useConcept = true;
-    else if (cfg.conceptual === "both") useConcept = Math.random() < 0.4;
-    else useConcept = false;
-    if (useConcept && !cfg.topics.length && cfg.conceptual !== "concept") useConcept = false;
+    let mode; // "numeric" | "concept" | "truefalse"
+    if (cfg.conceptual === "concept") mode = "concept";
+    else if (cfg.conceptual === "truefalse") mode = "truefalse";
+    else if (cfg.conceptual === "both") { const r = Math.random(); mode = r < 0.34 ? "concept" : (r < 0.6 ? "truefalse" : "numeric"); }
+    else mode = "numeric";
     let q, tries = 0;
     do {
-      q = useConcept ? nextConcept(L) : makeNumericQuestion(L);
+      if (mode === "concept") q = nextConcept(L);
+      else if (mode === "truefalse") q = nextTrueFalse(L);
+      else q = makeNumericQuestion(L);
       tries++;
-    } while (!useConcept && _usedTexts.has(q.text) && tries < 6);
+    } while (_usedTexts.has(q.text) && tries < 6);
     _usedTexts.add(q.text);
     q._level = L;
     q.time = questionSeconds(q._topic, L);
@@ -1211,7 +1359,7 @@
     const q = questions[idx];
     wrongCount++;
     if (cfg.diff === "adaptive") adaptiveLevel = Math.max(1, adaptiveLevel - 1); // timeout counts as wrong
-    review.push({ text: q.text, answer: q.answer, picked: null, correct: false });
+    review.push({ text: q.text, answer: q.answer, picked: null, correct: false, tf: !!q._tf });
     revealAnswers(-1);
     $("feedback").innerHTML = "⏱ Time's up! <div class='pts'>Correct answer: " + q.answer + "</div>";
     next();
@@ -1248,7 +1396,7 @@
       wrongCount++;
     }
 
-    review.push({ text: q.text, answer: q.answer, picked, correct: isCorrect });
+    review.push({ text: q.text, answer: q.answer, picked, correct: isCorrect, tf: !!q._tf });
     revealAnswers(i);
 
     const fb = $("feedback");
@@ -1312,10 +1460,66 @@
       const pickedTxt = r.picked === null ? "no answer (time-out)" : r.picked;
       row.innerHTML =
         '<span class="mark">' + (r.correct ? "✓" : "✗") + "</span>" +
-        '<span class="q">' + r.text + " = " + r.answer + "</span>" +
+        '<span class="q">' + r.text + (r.tf ? " → " : " = ") + r.answer + "</span>" +
         '<span class="ans">' + (r.correct ? "you got it" : "you put: " + pickedTxt) + "</span>";
       rev.appendChild(row);
     });
+  }
+
+  // ---------- Question catalog ----------
+  // Tallies how much content MathHoot has, per topic × difficulty level, split
+  // into Numerical (distinct generator templates), Conceptual and True/False
+  // (distinct bank entries). Numeric counts come from instrumenting build(): one
+  // call per topic/level captures that level's variant-array size.
+  const TOPIC_LABEL = {
+    arithmetic: "Arithmetic", fractions: "Fractions & %", algebra: "Algebra",
+    exponents: "Powers & Roots", geometry: "Geometry", numbertheory: "Number Theory",
+    statistics: "Statistics", sequences: "Sequences", trigonometry: "Trigonometry",
+    calculus: "Calculus",
+  };
+  const TOPIC_ORDER = Object.keys(TOPIC_LABEL);
+  let _catalog = null;
+  function computeCatalog() {
+    if (_catalog) return _catalog;
+    const savedTopics = cfg.topics;
+    const data = {};
+    TOPIC_ORDER.forEach((t) => {
+      data[t] = { numeric: [], concept: [], truefalse: [] };
+      for (let L = 1; L <= 5; L++) {
+        let n = 0;
+        try { GEN[t](L); n = _lastVariantCount; } catch (e) { n = 0; }
+        data[t].numeric[L] = n;
+        data[t].concept[L] = CONCEPT_BANK.filter((e) => e.t === t && e.L === L).length;
+        data[t].truefalse[L] = TRUEFALSE_BANK.filter((e) => e.t === t && e.L === L).length;
+      }
+    });
+    cfg.topics = savedTopics;
+    _catalog = data;
+    return data;
+  }
+  function catalogTable(title, key, data) {
+    let colTot = [0, 0, 0, 0, 0, 0], grand = 0;
+    let rows = "";
+    TOPIC_ORDER.forEach((t) => {
+      let rowTot = 0, cells = "";
+      for (let L = 1; L <= 5; L++) { const v = data[t][key][L] || 0; rowTot += v; colTot[L] += v; cells += "<td>" + (v || "·") + "</td>"; }
+      grand += rowTot;
+      rows += "<tr><th>" + TOPIC_LABEL[t] + "</th>" + cells + "<td class='tot'>" + rowTot + "</td></tr>";
+    });
+    let foot = "<tr class='foot'><th>All topics</th>";
+    for (let L = 1; L <= 5; L++) foot += "<td>" + colTot[L] + "</td>";
+    foot += "<td class='tot'>" + grand + "</td></tr>";
+    return "<div class='cat-block'><h4>" + title + " <span class='cat-sum'>" + grand + " total</span></h4>" +
+      "<table class='cat-table'><thead><tr><th>Topic</th><th>Easy</th><th>Med</th><th>Hard</th><th>Expert</th><th>College</th><th class='tot'>Total</th></tr></thead>" +
+      "<tbody>" + rows + foot + "</tbody></table></div>";
+  }
+  function renderCatalog() {
+    const data = computeCatalog();
+    $("catalogBody").innerHTML =
+      catalogTable("Numerical — question templates", "numeric", data) +
+      catalogTable("Conceptual — questions in bank", "concept", data) +
+      catalogTable("True / False — statements in bank", "truefalse", data) +
+      "<p class='cat-note'>Numerical figures count distinct question <em>templates</em> per level; each template also randomizes its numbers, so the playable variety is far larger. Conceptual and True/False figures count distinct questions in their banks. A “·” means none at that level.</p>";
   }
 
   // ---------- Wire up ----------
@@ -1323,6 +1527,12 @@
   $("againBtn").addEventListener("click", () => {
     resultsEl.classList.add("hidden");
     setupEl.classList.remove("hidden");
+  });
+  $("catalogToggle").addEventListener("click", () => {
+    const panel = $("catalog");
+    const hidden = panel.classList.toggle("hidden");
+    if (!hidden) renderCatalog();
+    $("catalogToggle").textContent = hidden ? "📊 Show question catalog" : "📊 Hide question catalog";
   });
 
   validate();
