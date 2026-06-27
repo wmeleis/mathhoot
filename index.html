@@ -264,17 +264,42 @@
   .btn-secondary:hover { filter: brightness(1.1); }
 
   .review { text-align: left; margin-top: 30px; border-top: 1px solid #eee; padding-top: 18px; }
-  .review h3 { font-size: 15px; color: #888; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 12px; }
+  .review h3 { font-size: 15px; color: #888; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 0; }
+  .review-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .rev-controls { display: flex; gap: 8px; }
+  .rev-ctrl { border: 1px solid #ddd; background: #fff; color: #666; font-size: 12px; font-weight: 700; padding: 6px 10px; border-radius: 8px; cursor: pointer; }
+  .rev-ctrl:hover { border-color: #bbb; }
+  .rev-item { border-radius: 8px; margin-bottom: 6px; overflow: hidden; background: #f7f7f9; }
+  .rev-item.ok { background: #eaf6e8; }
+  .rev-item.no { background: #fbe9eb; }
   .rev-row {
     display: flex; align-items: center; gap: 12px;
-    padding: 10px 12px; border-radius: 8px; margin-bottom: 6px;
-    background: #f7f7f9; font-size: 16px;
+    padding: 10px 12px; font-size: 16px; cursor: pointer;
   }
-  .rev-row .mark { font-size: 20px; width: 24px; text-align:center; }
-  .rev-row.ok { background: #eaf6e8; }
-  .rev-row.no { background: #fbe9eb; }
+  .rev-row .mark { font-size: 20px; width: 24px; text-align: center; flex-shrink: 0; }
   .rev-row .q { font-weight: 700; flex: 1; }
-  .rev-row .ans { color: #555; font-size: 14px; }
+  .rev-row .ans { color: #555; font-size: 14px; flex-shrink: 0; }
+  .rev-row .caret { color: #999; font-size: 13px; transition: transform .2s; flex-shrink: 0; }
+  .rev-item.open .rev-row .caret { transform: rotate(180deg); }
+  .rev-explain { display: none; padding: 2px 14px 12px 48px; font-size: 14px; color: #444; line-height: 1.55; }
+  .rev-item.open .rev-explain { display: block; }
+  .rev-explain p { margin: 0 0 8px 0; }
+  .rev-link { display: inline-block; color: var(--blue); font-weight: 700; text-decoration: none; font-size: 14px; }
+  .rev-link:hover { text-decoration: underline; }
+
+  /* ---------- Report card ---------- */
+  .report { text-align: left; margin-top: 26px; border-top: 1px solid #eee; padding-top: 18px; }
+  .report h3 { font-size: 15px; color: #888; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 14px; }
+  .rc-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .rc-label { width: 132px; flex-shrink: 0; font-weight: 700; font-size: 14px; color: #333; }
+  .rc-bar { flex: 1; height: 12px; background: #eee; border-radius: 999px; overflow: hidden; }
+  .rc-fill { height: 100%; border-radius: 999px; transition: width .5s ease; }
+  .rc-fill.good { background: var(--green); }
+  .rc-fill.ok { background: var(--yellow); }
+  .rc-fill.bad { background: var(--red); }
+  .rc-pct { width: 92px; flex-shrink: 0; text-align: right; font-size: 13px; color: #999; }
+  .rc-pct b { color: var(--ink); font-size: 15px; }
+  @media (max-width: 560px) { .rc-label { width: 96px; font-size: 13px; } .rc-pct { width: 80px; } }
 
   /* ---------- Question catalog ---------- */
   .catalog-toggle {
@@ -430,6 +455,7 @@
         <div class="stat bad"><div class="n" id="resWrong">0</div><div class="l">Wrong</div></div>
         <div class="stat"><div class="n" id="resAccuracy">0%</div><div class="l">Accuracy</div></div>
       </div>
+      <div class="report" id="reportCard"></div>
       <button id="againBtn" class="btn-secondary">Play again</button>
       <div class="review" id="review"></div>
     </div>
@@ -1167,6 +1193,7 @@
     try { q = GEN[topic](L); } catch (e) { q = gArith(L); }
     q = finalize(q);
     q._topic = topic;
+    q._subject = topic;
     return q;
   }
 
@@ -1188,6 +1215,7 @@
     const e = _cQueue.shift() || pick(CONCEPT_BANK);
     const q = finalize({ text: e.q, answer: e.a, options: e.d.slice(), sub: "Concept" });
     q._topic = "concepts";
+    q._subject = e.t;
     return q;
   }
   // True/False questions: 2 fixed options, no-repeat queue (mirrors nextConcept).
@@ -1200,7 +1228,7 @@
       _tfQueue = shuffle(unused.length ? unused : pool);
     }
     const e = _tfQueue.shift() || pick(TRUEFALSE_BANK);
-    return { text: e.q, answer: e.a, options: ["True", "False"], sub: "True / False", _topic: e.t, _tf: true };
+    return { text: e.q, answer: e.a, options: ["True", "False"], sub: "True / False", _topic: e.t, _subject: e.t, _tf: true };
   }
   // Generate one question at level L, honoring the numeric/conceptual/both setting.
   function generateOne(L) {
@@ -1359,7 +1387,7 @@
     const q = questions[idx];
     wrongCount++;
     if (cfg.diff === "adaptive") adaptiveLevel = Math.max(1, adaptiveLevel - 1); // timeout counts as wrong
-    review.push({ text: q.text, answer: q.answer, picked: null, correct: false, tf: !!q._tf });
+    review.push({ text: q.text, answer: q.answer, picked: null, correct: false, tf: !!q._tf, subject: q._subject });
     revealAnswers(-1);
     $("feedback").innerHTML = "⏱ Time's up! <div class='pts'>Correct answer: " + q.answer + "</div>";
     next();
@@ -1396,7 +1424,7 @@
       wrongCount++;
     }
 
-    review.push({ text: q.text, answer: q.answer, picked, correct: isCorrect, tf: !!q._tf });
+    review.push({ text: q.text, answer: q.answer, picked, correct: isCorrect, tf: !!q._tf, subject: q._subject });
     revealAnswers(i);
 
     const fb = $("feedback");
@@ -1452,17 +1480,55 @@
       acc >= 50   ? "Nice work!" :
                     "Keep practicing!";
 
+    // ----- Report card: % correct per subject area tested -----
+    const bySubject = {};
+    review.forEach((r) => {
+      const s = r.subject || "other";
+      if (!bySubject[s]) bySubject[s] = { c: 0, t: 0 };
+      bySubject[s].t++;
+      if (r.correct) bySubject[s].c++;
+    });
+    const order = TOPIC_ORDER.filter((s) => bySubject[s])
+      .concat(Object.keys(bySubject).filter((s) => TOPIC_ORDER.indexOf(s) < 0));
+    let rcHtml = "<h3>Report card — by subject</h3>";
+    order.forEach((s) => {
+      const o = bySubject[s];
+      const pct = Math.round((o.c / o.t) * 100);
+      const cls = pct >= 80 ? "good" : pct >= 50 ? "ok" : "bad";
+      rcHtml +=
+        '<div class="rc-row">' +
+        '<div class="rc-label">' + (TOPIC_LABEL[s] || s) + "</div>" +
+        '<div class="rc-bar"><div class="rc-fill ' + cls + '" style="width:' + pct + '%"></div></div>' +
+        '<div class="rc-pct"><b>' + pct + "%</b> (" + o.c + "/" + o.t + ")</div>" +
+        "</div>";
+    });
+    $("reportCard").innerHTML = rcHtml;
+
     const rev = $("review");
-    rev.innerHTML = "<h3>Review</h3>";
-    review.forEach((r, i) => {
-      const row = document.createElement("div");
-      row.className = "rev-row " + (r.correct ? "ok" : "no");
+    rev.innerHTML =
+      '<div class="review-head"><h3>Review</h3>' +
+      '<div class="rev-controls">' +
+      '<button class="rev-ctrl" data-act="expand" type="button">Show all explanations</button>' +
+      '<button class="rev-ctrl" data-act="collapse" type="button">Hide all</button>' +
+      "</div></div>";
+    review.forEach((r) => {
+      const item = document.createElement("div");
+      // incorrect answers start expanded; correct ones collapsed
+      item.className = "rev-item " + (r.correct ? "ok" : "no open");
       const pickedTxt = r.picked === null ? "no answer (time-out)" : r.picked;
-      row.innerHTML =
-        '<span class="mark">' + (r.correct ? "✓" : "✗") + "</span>" +
-        '<span class="q">' + r.text + (r.tf ? " → " : " = ") + r.answer + "</span>" +
-        '<span class="ans">' + (r.correct ? "you got it" : "you put: " + pickedTxt) + "</span>";
-      rev.appendChild(row);
+      const rule = khanFor(r.subject, r.text);
+      const verdict = r.tf ? ("This statement is " + r.answer + ".") : ("Correct answer: " + r.answer + ".");
+      const hint = rule[2] ? " " + rule[2] : "";
+      const link = '<a class="rev-link" href="' + khanURL(rule) + '" target="_blank" rel="noopener">Khan Academy: ' + rule[1] + " →</a>";
+      item.innerHTML =
+        '<div class="rev-row">' +
+          '<span class="mark">' + (r.correct ? "✓" : "✗") + "</span>" +
+          '<span class="q">' + r.text + (r.tf ? " → " : " = ") + r.answer + "</span>" +
+          '<span class="ans">' + (r.correct ? "you got it" : "you put: " + pickedTxt) + "</span>" +
+          '<span class="caret">▾</span>' +
+        "</div>" +
+        '<div class="rev-explain"><p>' + verdict + hint + "</p>" + link + "</div>";
+      rev.appendChild(item);
     });
   }
 
@@ -1478,6 +1544,130 @@
     calculus: "Calculus",
   };
   const TOPIC_ORDER = Object.keys(TOPIC_LABEL);
+
+  // Maps each question to its specific Khan Academy sub-topic (not the broad
+  // course). Each rule is [matcher, query, hint] tested against the question
+  // text; first match wins, falling back to KHAN_DEFAULT per subject. The link
+  // targets Khan's results for that precise sub-topic, which surface the exact
+  // articles/videos. To pin an exact article instead, add a 4th element (url).
+  const KHAN_RULES = {
+    arithmetic: [
+      [/\bmod\b/i, "modular arithmetic", "The result is the remainder after division."],
+      [/binary/i, "converting decimal to binary", "Binary is base-2; each place is a power of 2."],
+      [/hexadecimal/i, "hexadecimal number system", "Hex is base-16, using digits 0–9 and A–F."],
+      [/sum of all integers/i, "sum of an arithmetic series", "Add 1 through n with n(n+1)/2."],
+      [/[²³]|squared|cubed/i, "exponents", "An exponent says how many times to multiply the base by itself."],
+    ],
+    fractions: [
+      [/compounded/i, "compound interest", "Interest grows on the principal plus prior interest."],
+      [/%|percent/i, "percent word problems", "A percent is a fraction out of 100."],
+      [/ratio/i, "ratios", "Split the total into equal parts according to the ratio."],
+      [/simplify/i, "simplifying fractions", "Divide the top and bottom by their greatest common factor."],
+      [/[×÷]/, "multiplying and dividing fractions", "Multiply across; to divide, multiply by the reciprocal."],
+      [/improper|mixed/i, "mixed numbers and improper fractions", "Convert between mixed numbers and improper fractions."],
+      [/decimal|0\.\d/i, "converting decimals and fractions", "Decimals and fractions are two ways to write the same value."],
+    ],
+    algebra: [
+      [/log/i, "solving logarithmic equations", "logₙ(x) = y means n^y = x."],
+      [/determinant|matrix/i, "matrix determinant", "For a 2×2 matrix, the determinant is ad − bc."],
+      [/conjugate|imaginary|\di\b/i, "multiplying complex numbers", "Use i² = −1 and combine real and imaginary parts."],
+      [/f\(g\(|f\(x\)\s*=/i, "evaluating composite functions", "Evaluate the inner function first, then the outer."],
+      [/coefficient|\(1 \+ x\)/i, "binomial theorem", "The coefficient of xᵏ in (1 + x)ⁿ is C(n, k)."],
+      [/system/i, "systems of equations", "Solve by substitution or elimination."],
+      [/x²|= 0/i, "solving quadratic equations", "Factor, complete the square, or use the quadratic formula."],
+      [/\^x/i, "solving exponential equations", "Rewrite both sides with the same base, or take a logarithm."],
+      [/[<>≤≥]/, "solving inequalities", "Solve as an equation, but flip the sign when multiplying or dividing by a negative."],
+      [/\|x\|/i, "absolute value equations", "|x| = a gives x = a or x = −a."],
+      [/vertex/i, "vertex of a parabola", "The vertex x-coordinate is −b/(2a)."],
+      [/slope/i, "slope of a line", "Slope is rise over run; parallel lines share a slope."],
+    ],
+    exponents: [
+      [/√/, "simplifying square roots", "Pull perfect-square factors out from under the radical."],
+      [/∛|cube root/i, "cube roots", "A cube root undoes cubing."],
+      [/\bln\b|log/i, "introduction to logarithms", "A logarithm is the inverse of an exponent."],
+      [/scientific notation/i, "scientific notation", "Write numbers as a × 10ⁿ with 1 ≤ a < 10."],
+      [/⁻|negative exponent/i, "negative exponents", "A negative exponent means take the reciprocal."],
+      [/\^|simplify|·/i, "exponent properties", "Add exponents to multiply like bases; multiply them for a power of a power."],
+    ],
+    geometry: [
+      [/volume/i, "volume of solids", "Box = l·w·h, cylinder = πr²h, sphere = (4/3)πr³."],
+      [/perimeter/i, "perimeter", "Perimeter is the total distance around a shape."],
+      [/hypotenuse|right triangle/i, "Pythagorean theorem", "In a right triangle, a² + b² = c²."],
+      [/circle|circumference/i, "area and circumference of circles", "Area = πr², circumference = 2πr."],
+      [/vector|dot product/i, "vectors", "Add components; the dot product is x₁x₂ + y₁y₂."],
+      [/distance|midpoint|x² \+ y²/i, "distance and midpoint formulas", "Apply the distance and midpoint formulas to coordinates."],
+      [/area/i, "area of shapes", "Match each shape to its area formula."],
+      [/similar/i, "similar triangles", "Corresponding sides of similar figures are proportional."],
+      [/angle|°|supplement|polygon/i, "angles", "Triangle angles sum to 180°; quadrilaterals to 360°."],
+    ],
+    numbertheory: [
+      [/totient/i, "Euler's totient function", "φ(n) counts the integers up to n that are coprime to n."],
+      [/fermat/i, "Fermat's little theorem", "a^(p−1) ≡ 1 (mod p) for a prime p."],
+      [/prime/i, "prime numbers", "A prime number has exactly two factors: 1 and itself."],
+      [/gcd/i, "greatest common factor", "The GCD is the largest factor the numbers share."],
+      [/lcm/i, "least common multiple", "The LCM is the smallest multiple the numbers share."],
+      [/\bmod\b/i, "modular arithmetic", "Work with the remainder after division."],
+      [/binary/i, "binary numbers", "Binary is base-2."],
+      [/divisib|factor|divisor/i, "factors and divisibility", "Use divisibility rules and prime factorization."],
+    ],
+    statistics: [
+      [/deviation|variance/i, "standard deviation", "Standard deviation is the square root of the variance."],
+      [/z-score/i, "z-scores", "z = (value − mean) ÷ standard deviation."],
+      [/normal|within \d SD/i, "normal distribution", "The 68–95–99.7 rule describes the normal curve."],
+      [/choose|arrangements|combination|permutation|\bC\(|\bP\(/i, "combinations and permutations", "Combinations ignore order; permutations count it."],
+      [/probability|dice|marble|coin|P\(/i, "basic probability", "Probability = favorable ÷ total outcomes (always 0 to 1)."],
+      [/expected/i, "expected value", "Expected value weights each outcome by its probability."],
+      [/median/i, "median", "The median is the middle value of an ordered set."],
+      [/\bmode\b/i, "mode", "The mode is the most frequent value."],
+      [/range/i, "range of a data set", "Range = maximum − minimum."],
+      [/mean|average/i, "mean (average)", "Mean = sum ÷ count."],
+    ],
+    sequences: [
+      [/geometric/i, "geometric sequences", "Each term multiplies by a constant ratio."],
+      [/infinite|converge/i, "infinite geometric series", "The sum is a/(1 − r) when |r| < 1."],
+      [/arithmetic|common difference/i, "arithmetic sequences", "Each term adds a constant difference."],
+      [/sum|series/i, "geometric series", "Use the geometric-series sum formula."],
+      [/²|square/i, "sum of squares", "1² + … + n² = n(n+1)(2n+1)/6."],
+    ],
+    trigonometry: [
+      [/law of|meet at a|60° angle/i, "law of cosines", "c² = a² + b² − 2ab·cos(C)."],
+      [/identity|sin²|tan²|sec|csc|cot/i, "trigonometric identities", "The key identity is sin²θ + cos²θ = 1."],
+      [/period|amplitude/i, "graphs of sine and cosine", "The period of sin(bx) is 2π/b."],
+      [/arc length/i, "arc length", "Arc length = radius × angle (in radians)."],
+      [/radian|π\//i, "radians", "180° equals π radians."],
+      [/sin|cos|tan/i, "trigonometric ratios", "Use SOH-CAH-TOA and the unit circle."],
+    ],
+    calculus: [
+      [/∫|integral/i, "basic integration", "∫xⁿ dx = xⁿ⁺¹/(n+1) + C."],
+      [/lim/i, "introduction to limits", "A limit is the value a function approaches."],
+      [/x·|\)\^|chain/i, "product and chain rule", "Use the product rule for products and the chain rule for compositions."],
+      [/sin x|cos x|eˣ|ln x|tan x/i, "derivatives of trig and exponential functions", "Memorize the derivatives of sin, cos, eˣ, and ln x."],
+      [/second derivative/i, "second derivatives", "Differentiate twice."],
+      [/critical/i, "critical points", "Critical points occur where the first derivative is 0."],
+      [/d\/dx|derivative|f′/i, "the power rule", "d/dx[xⁿ] = n·xⁿ⁻¹."],
+    ],
+  };
+  const KHAN_DEFAULT = {
+    arithmetic: [null, "order of operations", "Do parentheses and exponents first, then × and ÷, then + and −."],
+    fractions: [null, "adding and subtracting fractions", "Use a common denominator before adding or comparing."],
+    algebra: [null, "two-step equations", "Undo the operations on both sides to isolate the variable."],
+    exponents: [null, "exponents", "An exponent tells how many times to multiply the base by itself."],
+    geometry: [null, "geometry", "Identify the shape, then apply the matching formula."],
+    numbertheory: [null, "factors and multiples", "Prime factorization is the core tool."],
+    statistics: [null, "mean, median, and mode", "Summarize data by its center and spread."],
+    sequences: [null, "sequences", "Find the rule connecting the terms."],
+    trigonometry: [null, "trigonometry", "Use SOH-CAH-TOA and the unit circle."],
+    calculus: [null, "derivatives", "Differentiate term by term with the power rule."],
+  };
+  function khanFor(subject, text) {
+    const rules = KHAN_RULES[subject] || [];
+    for (let i = 0; i < rules.length; i++) { if (rules[i][0].test(text || "")) return rules[i]; }
+    return KHAN_DEFAULT[subject] || [null, "math", ""];
+  }
+  function khanURL(rule) {
+    return rule[3] ? rule[3] : "https://www.khanacademy.org/search?page_search_query=" + encodeURIComponent(rule[1]);
+  }
+
   let _catalog = null;
   function computeCatalog() {
     if (_catalog) return _catalog;
@@ -1533,6 +1723,17 @@
     const hidden = panel.classList.toggle("hidden");
     if (!hidden) renderCatalog();
     $("catalogToggle").textContent = hidden ? "📊 Show question catalog" : "📊 Hide question catalog";
+  });
+  // Review explanations: per-row toggle, plus Show all / Hide all controls.
+  $("review").addEventListener("click", (e) => {
+    const ctrl = e.target.closest(".rev-ctrl");
+    if (ctrl) {
+      const open = ctrl.dataset.act === "expand";
+      $("review").querySelectorAll(".rev-item").forEach((it) => it.classList.toggle("open", open));
+      return;
+    }
+    const head = e.target.closest(".rev-row");
+    if (head) head.parentElement.classList.toggle("open");
   });
 
   validate();
