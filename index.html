@@ -332,6 +332,39 @@
   .cat-table tr.foot th, .cat-table tr.foot td { border-top: 2px solid #ddd; font-weight: 800; color: var(--ink); }
   .cat-note { font-size: 12px; color: #888; line-height: 1.5; margin-top: -6px; }
 
+  /* ---------- Question-set editor ---------- */
+  .ed-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  .ed-head h4 { font-size: 15px; color: #333; margin: 0; }
+  .ed-btn { border: 1px solid #ddd; background: #fff; color: #555; font-size: 13px; font-weight: 700; padding: 8px 12px; border-radius: 8px; cursor: pointer; }
+  .ed-btn:hover { border-color: #bbb; }
+  .ed-btn:disabled { opacity: .5; cursor: not-allowed; }
+  .ed-btn.primary { background: var(--green); border-color: var(--green); color: #fff; }
+  .ed-btn.danger { color: var(--red); }
+  .ed-btn.sm { padding: 4px 8px; font-size: 12px; }
+  .set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid #eee; border-radius: 10px; margin-bottom: 8px; }
+  .set-info b { display: block; color: var(--ink); }
+  .set-info span { font-size: 12px; color: #888; }
+  .set-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .ed-name { width: 100%; font-size: 16px; font-weight: 700; padding: 10px 12px; border: 2px solid #ddd; border-radius: 8px; margin-bottom: 12px; }
+  .ed-name:focus { border-color: var(--purple); outline: none; }
+  .q-card { border: 1px solid #eee; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; background: #faf9fc; }
+  .q-card-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  .q-card-top b { color: #666; font-size: 13px; }
+  .q-text { font-weight: 700; color: var(--ink); margin-bottom: 6px; }
+  .q-opts { list-style: none; margin: 0; padding: 0; }
+  .q-opts li { font-size: 14px; color: #666; padding: 2px 0; }
+  .q-opts li.correct { color: var(--green); font-weight: 700; }
+  .q-form { margin-top: 14px; border-top: 1px dashed #ddd; padding-top: 12px; }
+  .q-form h5 { font-size: 14px; color: #333; margin: 0 0 8px; }
+  .ed-input { width: 100%; font-size: 14px; padding: 8px 10px; border: 2px solid #ddd; border-radius: 8px; margin-bottom: 8px; font-family: inherit; }
+  .ed-input:focus { border-color: var(--purple); outline: none; }
+  .opt-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .opt-row input[type=radio] { flex-shrink: 0; width: 18px; height: 18px; }
+  .opt-row input[type=text] { flex: 1; font-size: 14px; padding: 7px 10px; border: 2px solid #ddd; border-radius: 8px; }
+  .opt-row input[type=text]:focus { border-color: var(--purple); outline: none; }
+  .ed-err { color: var(--red); font-size: 13px; font-weight: 600; margin-top: 6px; min-height: 16px; }
+  .ed-hint { font-size: 12px; color: #888; margin: 4px 0 8px; }
+
   .hidden { display: none !important; }
 </style>
 </head>
@@ -366,12 +399,11 @@
     </div>
 
     <div class="field">
-      <label class="h">Question type <span class="hint">— computation vs. conceptual reasoning</span></label>
+      <label class="h">Question types <span class="hint">— pick one or more</span></label>
       <div class="opts" id="qtype">
         <div class="opt sel" data-qtype="numeric">Numerical <span class="sub">computation</span></div>
         <div class="opt" data-qtype="concept">Conceptual <span class="sub">definitions &amp; reasoning</span></div>
         <div class="opt" data-qtype="truefalse">True / False <span class="sub">judge a statement</span></div>
-        <div class="opt" data-qtype="both">Mixed <span class="sub">all types</span></div>
       </div>
     </div>
 
@@ -425,6 +457,9 @@
 
     <button id="catalogToggle" class="catalog-toggle" type="button">📊 Show question catalog</button>
     <div id="catalog" class="catalog hidden"><div id="catalogBody"></div></div>
+
+    <button id="setsToggle" class="catalog-toggle" type="button">✏️ Create / edit question sets</button>
+    <div id="setsPanel" class="catalog hidden"></div>
   </div>
 
   <!-- ============ GAME ============ -->
@@ -474,7 +509,7 @@
     count: 10,
     pace: 1,         // time multiplier; 0 = no limit
     scoring: "time", // "time" | "count"
-    conceptual: "numeric", // "numeric" | "concept" | "both"
+    qtypes: ["numeric"], // multi-select: any of "numeric", "concept", "truefalse"
   };
 
   const LVL = { easy: 1, medium: 2, hard: 3, expert: 4, college: 5 };
@@ -527,14 +562,15 @@
   wireSingle("difficulty", "diff", "diff");
   wireSingle("count", "count", "count", Number);
   wireSingle("pace", "pace", "pace", Number);
-  wireSingle("qtype", "conceptual", "qtype");
+  wireMulti("qtype", "qtypes", "qtype");
   wireSingle("scoring", "scoring", "score");
 
   $("player").addEventListener("input", (e) => { cfg.name = e.target.value.trim() || "Player"; });
 
   function validate() {
-    // need a numerical topic unless running conceptual-only
-    $("startBtn").disabled = cfg.topics.length === 0 && cfg.conceptual !== "concept" && cfg.conceptual !== "truefalse";
+    // need ≥1 question type; numerical questions also need ≥1 topic
+    const needsTopic = cfg.qtypes.indexOf("numeric") >= 0;
+    $("startBtn").disabled = cfg.qtypes.length === 0 || (needsTopic && cfg.topics.length === 0);
   }
 
   // ============================================================
@@ -1230,13 +1266,16 @@
     const e = _tfQueue.shift() || pick(TRUEFALSE_BANK);
     return { text: e.q, answer: e.a, options: ["True", "False"], sub: "True / False", _topic: e.t, _subject: e.t, _tf: true };
   }
-  // Generate one question at level L, honoring the numeric/conceptual/both setting.
+  // Generate one question at level L. cfg.qtypes is a multi-select of
+  // "numeric" / "concept" / "truefalse"; each question randomly picks one of the
+  // chosen types (numeric defers to a non-numeric type if no topics are selected).
   function generateOne(L) {
-    let mode; // "numeric" | "concept" | "truefalse"
-    if (cfg.conceptual === "concept") mode = "concept";
-    else if (cfg.conceptual === "truefalse") mode = "truefalse";
-    else if (cfg.conceptual === "both") { const r = Math.random(); mode = r < 0.34 ? "concept" : (r < 0.6 ? "truefalse" : "numeric"); }
-    else mode = "numeric";
+    const types = (cfg.qtypes && cfg.qtypes.length) ? cfg.qtypes : ["numeric"];
+    let mode = pick(types);
+    if (mode === "numeric" && !cfg.topics.length) {
+      const alt = types.filter((t) => t !== "numeric");
+      if (alt.length) mode = pick(alt);
+    }
     let q, tries = 0;
     do {
       if (mode === "concept") q = nextConcept(L);
@@ -1305,12 +1344,36 @@
   const review = [];
   const SHAPES = ["▲", "◆", "●", "■"];
   const LEVEL_NAME = ["Easy", "Medium", "Hard", "Expert", "College"];
+  let gameLen = 0;          // number of questions in the current game
+  let customActive = false; // true when playing a user-created set
 
   function startGame() {
     idx = 0; score = 0; correctCount = 0; wrongCount = 0;
     review.length = 0;
+    customActive = false;
     if (cfg.diff === "adaptive") { resetGenState(); adaptiveLevel = 2; questions = []; }
     else { questions = buildQuestionSet(); }
+    gameLen = cfg.count;
+    setupEl.classList.add("hidden");
+    resultsEl.classList.add("hidden");
+    gameEl.classList.remove("hidden");
+    showQuestion();
+  }
+
+  // Play a user-created question set. Each question keeps the author's own
+  // options (2–4); the whole set is played, in shuffled order.
+  function startCustomGame(set) {
+    idx = 0; score = 0; correctCount = 0; wrongCount = 0;
+    review.length = 0;
+    customActive = true;
+    const qtime = cfg.pace ? Math.max(5, Math.round(16 * cfg.pace)) : 0;
+    questions = shuffle(set.questions).map((q) => {
+      const ansVal = q.options[q.correct];
+      const opts = shuffle(q.options.slice());
+      return { text: q.text, answer: ansVal, options: opts, sub: set.name, _topic: "concepts",
+        _subject: set.name, _custom: true, _explain: q.explain || "", _tf: opts.length === 2, time: qtime };
+    });
+    gameLen = questions.length;
     setupEl.classList.add("hidden");
     resultsEl.classList.add("hidden");
     gameEl.classList.remove("hidden");
@@ -1319,9 +1382,9 @@
 
   function showQuestion() {
     answered = false;
-    if (cfg.diff === "adaptive" && !questions[idx]) questions[idx] = generateOne(adaptiveLevel);
+    if (!customActive && cfg.diff === "adaptive" && !questions[idx]) questions[idx] = generateOne(adaptiveLevel);
     const q = questions[idx];
-    $("progress").textContent = "Question " + (idx + 1) + " / " + cfg.count;
+    $("progress").textContent = "Question " + (idx + 1) + " / " + gameLen;
     $("scoreLabel").textContent = (cfg.scoring === "count" ? "Correct: " : "Score: ") + score;
     $("qNum").textContent = "Question " + (idx + 1);
     const qt = $("qText");
@@ -1330,7 +1393,7 @@
     qt.style.fontSize = len > 32 ? "clamp(20px, 4.6vw, 32px)"
                       : len > 18 ? "clamp(26px, 6.5vw, 44px)"
                       :            "clamp(34px, 9vw, 60px)";
-    $("qSub").textContent = (q.sub || "") + (cfg.diff === "adaptive" ? " · " + LEVEL_NAME[(q._level || 2) - 1] : "");
+    $("qSub").textContent = (q.sub || "") + (!customActive && cfg.diff === "adaptive" ? " · " + LEVEL_NAME[(q._level || 2) - 1] : "");
     $("feedback").textContent = "";
 
     const ans = $("answers");
@@ -1387,9 +1450,9 @@
     const q = questions[idx];
     wrongCount++;
     if (cfg.diff === "adaptive") adaptiveLevel = Math.max(1, adaptiveLevel - 1); // timeout counts as wrong
-    review.push({ text: q.text, answer: q.answer, picked: null, correct: false, tf: !!q._tf, subject: q._subject });
+    review.push({ text: q.text, answer: q.answer, picked: null, correct: false, tf: !!q._tf, subject: q._subject, custom: !!q._custom, explain: q._explain });
     revealAnswers(-1);
-    $("feedback").innerHTML = "⏱ Time's up! <div class='pts'>Correct answer: " + q.answer + "</div>";
+    $("feedback").innerHTML = "⏱ Time's up! <div class='pts'>Correct answer: " + escHtml(q.answer) + "</div>";
     next();
   }
 
@@ -1424,7 +1487,7 @@
       wrongCount++;
     }
 
-    review.push({ text: q.text, answer: q.answer, picked, correct: isCorrect, tf: !!q._tf, subject: q._subject });
+    review.push({ text: q.text, answer: q.answer, picked, correct: isCorrect, tf: !!q._tf, subject: q._subject, custom: !!q._custom, explain: q._explain });
     revealAnswers(i);
 
     const fb = $("feedback");
@@ -1433,7 +1496,7 @@
         ? " <div class='pts'>+" + gained + " points</div>"
         : " <div class='pts'>+1 correct</div>");
     } else {
-      fb.innerHTML = "✗ Not quite. <div class='pts'>Correct answer: " + q.answer + "</div>";
+      fb.innerHTML = "✗ Not quite. <div class='pts'>Correct answer: " + escHtml(q.answer) + "</div>";
     }
     next();
   }
@@ -1454,7 +1517,7 @@
   function next() {
     setTimeout(() => {
       idx++;
-      if (idx >= cfg.count) finish();
+      if (idx >= gameLen) finish();
       else showQuestion();
     }, 1700);
   }
@@ -1463,7 +1526,7 @@
   function finish() {
     gameEl.classList.add("hidden");
     resultsEl.classList.remove("hidden");
-    const total = cfg.count;
+    const total = gameLen;
     const acc = total ? Math.round((correctCount / total) * 100) : 0;
 
     $("resWho").textContent = cfg.name;
@@ -1497,7 +1560,7 @@
       const cls = pct >= 80 ? "good" : pct >= 50 ? "ok" : "bad";
       rcHtml +=
         '<div class="rc-row">' +
-        '<div class="rc-label">' + (TOPIC_LABEL[s] || s) + "</div>" +
+        '<div class="rc-label">' + (TOPIC_LABEL[s] || escHtml(s)) + "</div>" +
         '<div class="rc-bar"><div class="rc-fill ' + cls + '" style="width:' + pct + '%"></div></div>' +
         '<div class="rc-pct"><b>' + pct + "%</b> (" + o.c + "/" + o.t + ")</div>" +
         "</div>";
@@ -1515,15 +1578,22 @@
       const item = document.createElement("div");
       // incorrect answers start expanded; correct ones collapsed
       item.className = "rev-item " + (r.correct ? "ok" : "no open");
-      const pickedTxt = r.picked === null ? "no answer (time-out)" : r.picked;
-      const rule = khanFor(r.subject, r.text);
-      const verdict = r.tf ? ("This statement is " + r.answer + ".") : ("Correct answer: " + r.answer + ".");
-      const hint = rule[2] ? " " + rule[2] : "";
-      const link = '<a class="rev-link" href="' + khanURL(rule) + '" target="_blank" rel="noopener">Khan Academy: ' + rule[1] + " →</a>";
+      const qtext = escHtml(r.text), ans = escHtml(r.answer);
+      const pickedTxt = escHtml(r.picked === null ? "no answer (time-out)" : r.picked);
+      const verdict = r.tf ? ("This statement is " + ans + ".") : ("Correct answer: " + ans + ".");
+      let hint, link;
+      if (r.custom) {
+        hint = r.explain ? " " + escHtml(r.explain) : "";
+        link = "";
+      } else {
+        const rule = khanFor(r.subject, r.text);
+        hint = rule[2] ? " " + rule[2] : "";
+        link = '<a class="rev-link" href="' + khanURL(rule) + '" target="_blank" rel="noopener">Khan Academy: ' + rule[1] + " →</a>";
+      }
       item.innerHTML =
         '<div class="rev-row">' +
           '<span class="mark">' + (r.correct ? "✓" : "✗") + "</span>" +
-          '<span class="q">' + r.text + (r.tf ? " → " : " = ") + r.answer + "</span>" +
+          '<span class="q">' + qtext + (r.tf ? " → " : " = ") + ans + "</span>" +
           '<span class="ans">' + (r.correct ? "you got it" : "you put: " + pickedTxt) + "</span>" +
           '<span class="caret">▾</span>' +
         "</div>" +
@@ -1712,6 +1782,99 @@
       "<p class='cat-note'>Numerical figures count distinct question <em>templates</em> per level; each template also randomizes its numbers, so the playable variety is far larger. Conceptual and True/False figures count distinct questions in their banks. A “·” means none at that level.</p>";
   }
 
+  // ---------- Question-set editor ----------
+  // User-created multiple-choice question sets, stored locally in the browser.
+  const SETS_KEY = "mathhoot.sets.v1";
+  let editingId = null;
+  // localStorage may be blocked (e.g. opening the file via file:// in some
+  // browsers). Fall back to an in-memory store so the editor still works in that
+  // session; on a hosted https page it persists normally.
+  let _memSets = null, _lsOK = null;
+  function lsAvailable() {
+    if (_lsOK === null) { try { localStorage.setItem(SETS_KEY + ".t", "1"); localStorage.removeItem(SETS_KEY + ".t"); _lsOK = true; } catch (e) { _lsOK = false; } }
+    return _lsOK;
+  }
+  function loadSets() {
+    if (lsAvailable()) { try { return JSON.parse(localStorage.getItem(SETS_KEY)) || []; } catch (e) { return []; } }
+    return _memSets || (_memSets = []);
+  }
+  function saveSets(sets) {
+    if (lsAvailable()) { try { localStorage.setItem(SETS_KEY, JSON.stringify(sets)); return; } catch (e) {} }
+    _memSets = sets;
+  }
+  function uid() { return "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+  function escHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+  function renderSets() {
+    const sets = loadSets();
+    if (editingId) {
+      const s = sets.find((x) => x.id === editingId);
+      if (!s) { editingId = null; return renderSets(); }
+      renderSetEditor(s);
+    } else {
+      renderSetsList(sets);
+    }
+  }
+  function renderSetsList(sets) {
+    let html = '<div class="ed-head"><h4>My question sets</h4><button class="ed-btn primary" data-act="new">+ New set</button></div>';
+    if (!sets.length) html += '<p class="ed-hint">No sets yet. Create one to write your own multiple-choice questions, then play it like any other quiz.</p>';
+    sets.forEach((s) => {
+      const n = s.questions.length;
+      html += '<div class="set-row"><div class="set-info"><b>' + escHtml(s.name) + "</b><span>" + n + " question" + (n === 1 ? "" : "s") + "</span></div>" +
+        '<div class="set-actions">' +
+        '<button class="ed-btn" data-act="play" data-id="' + s.id + '"' + (n ? "" : " disabled") + ">▶ Play</button>" +
+        '<button class="ed-btn" data-act="edit" data-id="' + s.id + '">Edit</button>' +
+        '<button class="ed-btn danger" data-act="del" data-id="' + s.id + '">Delete</button>' +
+        "</div></div>";
+    });
+    $("setsPanel").innerHTML = html;
+  }
+  function optionRows() {
+    let h = "";
+    for (let i = 0; i < 4; i++) {
+      h += '<label class="opt-row"><input type="radio" name="nfCorrect" value="' + i + '"' + (i === 0 ? " checked" : "") +
+        '><input type="text" class="nfOpt" placeholder="Option ' + (i + 1) + (i < 2 ? "" : " (optional)") + '"></label>';
+    }
+    return h;
+  }
+  function renderSetEditor(s) {
+    let html = '<div class="ed-head"><h4>Edit set</h4><button class="ed-btn" data-act="back">← Back to sets</button></div>';
+    html += '<input class="ed-name" id="edName" type="text" placeholder="Set name" value="' + escHtml(s.name) + '">';
+    if (!s.questions.length) html += '<p class="ed-hint">No questions yet — add your first below.</p>';
+    s.questions.forEach((q, qi) => {
+      html += '<div class="q-card"><div class="q-card-top"><b>Q' + (qi + 1) + '</b><button class="ed-btn danger sm" data-act="delq" data-qi="' + qi + '">Delete</button></div>' +
+        '<div class="q-text">' + escHtml(q.text) + '</div><ul class="q-opts">';
+      q.options.forEach((o, oi) => { html += "<li" + (oi === q.correct ? ' class="correct"' : "") + ">" + (oi === q.correct ? "✓ " : "") + escHtml(o) + "</li>"; });
+      html += "</ul></div>";
+    });
+    html += '<div class="q-form"><h5>Add a question</h5>' +
+      '<textarea id="nfText" class="ed-input" rows="2" placeholder="Question text"></textarea>' +
+      '<p class="ed-hint">Fill in 2–4 options and select the correct one.</p>' +
+      optionRows() +
+      '<input id="nfExplain" class="ed-input" type="text" placeholder="Explanation (optional — shown in the review)">' +
+      '<button class="ed-btn primary" data-act="addq">Add question</button>' +
+      '<div id="nfErr" class="ed-err"></div></div>';
+    $("setsPanel").innerHTML = html;
+  }
+  function addQuestionFromForm() {
+    const sets = loadSets();
+    const s = sets.find((x) => x.id === editingId);
+    if (!s) return;
+    const text = $("nfText").value.trim();
+    const optEls = [...$("setsPanel").querySelectorAll(".nfOpt")];
+    const checked = $("setsPanel").querySelector('input[name="nfCorrect"]:checked');
+    const correctRaw = checked ? +checked.value : 0;
+    const filled = []; let correctIdx = -1;
+    optEls.forEach((el, i) => { const v = el.value.trim(); if (v) { if (i === correctRaw) correctIdx = filled.length; filled.push(v); } });
+    const err = $("nfErr");
+    if (!text) { err.textContent = "Enter the question text."; return; }
+    if (filled.length < 2) { err.textContent = "Enter at least two options."; return; }
+    if (correctIdx < 0) { err.textContent = "Mark which filled-in option is correct."; return; }
+    s.questions.push({ text: text, options: filled, correct: correctIdx, explain: $("nfExplain").value.trim() });
+    saveSets(sets);
+    renderSets();
+  }
+
   // ---------- Wire up ----------
   $("startBtn").addEventListener("click", startGame);
   $("againBtn").addEventListener("click", () => {
@@ -1734,6 +1897,29 @@
     }
     const head = e.target.closest(".rev-row");
     if (head) head.parentElement.classList.toggle("open");
+  });
+  // Question-set editor
+  $("setsToggle").addEventListener("click", () => {
+    const panel = $("setsPanel");
+    const hidden = panel.classList.toggle("hidden");
+    if (!hidden) { editingId = null; renderSets(); }
+    $("setsToggle").textContent = hidden ? "✏️ Create / edit question sets" : "✏️ Hide question sets";
+  });
+  $("setsPanel").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-act]");
+    if (!btn) return;
+    const act = btn.dataset.act;
+    const sets = loadSets();
+    if (act === "new") { const s = { id: uid(), name: "New set", questions: [] }; sets.push(s); saveSets(sets); editingId = s.id; renderSets(); }
+    else if (act === "edit") { editingId = btn.dataset.id; renderSets(); }
+    else if (act === "back") { editingId = null; renderSets(); }
+    else if (act === "del") { if (window.confirm("Delete this set? This cannot be undone.")) { saveSets(sets.filter((x) => x.id !== btn.dataset.id)); renderSets(); } }
+    else if (act === "play") { const s = sets.find((x) => x.id === btn.dataset.id); if (s && s.questions.length) startCustomGame(s); }
+    else if (act === "delq") { const s = sets.find((x) => x.id === editingId); if (s) { s.questions.splice(+btn.dataset.qi, 1); saveSets(sets); renderSets(); } }
+    else if (act === "addq") { addQuestionFromForm(); }
+  });
+  $("setsPanel").addEventListener("input", (e) => {
+    if (e.target.id === "edName") { const sets = loadSets(); const s = sets.find((x) => x.id === editingId); if (s) { s.name = e.target.value; saveSets(sets); } }
   });
 
   validate();
