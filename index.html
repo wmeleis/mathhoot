@@ -367,6 +367,8 @@
   .pick-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; align-items: center; }
   .ed-select { font-size: 13px; padding: 7px 8px; border: 2px solid #ddd; border-radius: 8px; background: #fff; font-family: inherit; }
   .ed-select:focus { border-color: var(--purple); outline: none; }
+  .ed-flash { background: #eaf6e8; border: 1px solid var(--green); color: #1e5e12; font-size: 13px; font-weight: 700; padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; }
+  .sh-label { font-size: 12px; font-weight: 700; color: #666; text-transform: uppercase; letter-spacing: .3px; margin: 10px 0 4px; }
 
   .hidden { display: none !important; }
 </style>
@@ -1788,7 +1790,7 @@
   // ---------- Question-set editor ----------
   // User-created multiple-choice question sets, stored locally in the browser.
   const SETS_KEY = "mathhoot.sets.v1";
-  let editingId = null;
+  let editingId = null, sharingId = null, importing = false, _flash = "";
   // localStorage may be blocked (e.g. opening the file via file:// in some
   // browsers). Fall back to an in-memory store so the editor still works in that
   // session; on a hosted https page it persists normally.
@@ -1807,6 +1809,48 @@
   }
   function uid() { return "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
   function escHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+  // Share/import: encode a set into a compact URL-safe string (no backend).
+  function encodeSet(set) {
+    const payload = { n: String(set.name || "").slice(0, 80), q: (set.questions || []).slice(0, 200).map((q) => ({ t: String(q.text || "").slice(0, 500), o: (q.options || []).slice(0, 6).map((o) => String(o).slice(0, 200)), c: +q.correct || 0, e: String(q.explain || "").slice(0, 500) })) };
+    const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+    return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+  function decodeSet(code) {
+    code = String(code || "").trim();
+    const m = code.match(/[#?&](?:set|import)=([^&\s]+)/); // accept a full shared URL too
+    if (m) code = m[1];
+    let b64 = code.replace(/-/g, "+").replace(/_/g, "/");
+    while (b64.length % 4) b64 += "=";
+    const p = JSON.parse(decodeURIComponent(escape(atob(b64))));
+    const questions = (p.q || []).map((q) => {
+      const opts = (q.o || []).map(String).filter((o) => o.length);
+      let c = +q.c || 0; if (c < 0 || c >= opts.length) c = 0;
+      return { text: String(q.t || ""), options: opts, correct: c, explain: String(q.e || "") };
+    }).filter((q) => q.text && q.options.length >= 2);
+    if (!questions.length) throw new Error("no valid questions");
+    return { id: uid(), name: String(p.n || "Imported set") || "Imported set", questions: questions };
+  }
+  function copyText(t) {
+    if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(t).catch(() => {}); return; }
+    const ta = document.createElement("textarea"); ta.value = t; document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); } catch (e) {} document.body.removeChild(ta);
+  }
+  // If the page was opened via a shared link (#set=…), import that set on load.
+  function maybeImportFromUrl() {
+    const m = (location.hash || "").match(/[#&]set=([^&\s]+)/);
+    if (!m) return;
+    try {
+      const set = decodeSet(m[1]);
+      const sets = loadSets(); sets.push(set); saveSets(sets);
+      _flash = "Imported “" + set.name + "” (" + set.questions.length + " questions).";
+      editingId = null; sharingId = null; importing = false;
+      $("setsPanel").classList.remove("hidden");
+      $("setsToggle").textContent = "✏️ Hide question sets";
+      renderSets();
+    } catch (e) {}
+    try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { location.hash = ""; }
+  }
 
   // Problem picker — build a set by choosing specific generated / bank problems.
   let _picker = { topic: "arithmetic", level: 2, type: "numeric" };
@@ -1852,6 +1896,13 @@
 
   function renderSets() {
     const sets = loadSets();
+    if (importing) { renderImportView(); return; }
+    if (sharingId) {
+      const s = sets.find((x) => x.id === sharingId);
+      if (!s) { sharingId = null; return renderSets(); }
+      renderShareView(s);
+      return;
+    }
     if (editingId) {
       const s = sets.find((x) => x.id === editingId);
       if (!s) { editingId = null; return renderSets(); }
@@ -1861,17 +1912,38 @@
     }
   }
   function renderSetsList(sets) {
-    let html = '<div class="ed-head"><h4>My question sets</h4><button class="ed-btn primary" data-act="new">+ New set</button></div>';
-    if (!sets.length) html += '<p class="ed-hint">No sets yet. Create one to write your own multiple-choice questions, then play it like any other quiz.</p>';
+    let html = "";
+    if (_flash) { html += '<div class="ed-flash">' + escHtml(_flash) + "</div>"; _flash = ""; }
+    html += '<div class="ed-head"><h4>My question sets</h4><div class="set-actions"><button class="ed-btn" data-act="import">Import</button><button class="ed-btn primary" data-act="new">+ New set</button></div></div>';
+    if (!sets.length) html += '<p class="ed-hint">No sets yet. Create one, or import a set someone shared with you.</p>';
     sets.forEach((s) => {
       const n = s.questions.length;
       html += '<div class="set-row"><div class="set-info"><b>' + escHtml(s.name) + "</b><span>" + n + " question" + (n === 1 ? "" : "s") + "</span></div>" +
         '<div class="set-actions">' +
         '<button class="ed-btn" data-act="play" data-id="' + s.id + '"' + (n ? "" : " disabled") + ">▶ Play</button>" +
         '<button class="ed-btn" data-act="edit" data-id="' + s.id + '">Edit</button>' +
+        '<button class="ed-btn" data-act="share" data-id="' + s.id + '"' + (n ? "" : " disabled") + ">Share</button>" +
         '<button class="ed-btn danger" data-act="del" data-id="' + s.id + '">Delete</button>' +
         "</div></div>";
     });
+    $("setsPanel").innerHTML = html;
+  }
+  function renderShareView(s) {
+    const code = encodeSet(s);
+    const link = location.origin + location.pathname + "#set=" + code;
+    let html = '<div class="ed-head"><h4>Share “' + escHtml(s.name) + '”</h4><button class="ed-btn" data-act="back">← Back to sets</button></div>';
+    html += '<p class="ed-hint">Send this link — opening it adds a copy of the set. No account needed. (For very large sets, share the code instead and use Import.)</p>';
+    html += '<div class="sh-label">Shareable link</div><textarea id="shLink" class="ed-input" rows="3" readonly>' + escHtml(link) + "</textarea>";
+    html += '<button class="ed-btn primary" data-act="copylink">Copy link</button>';
+    html += '<div class="sh-label">Code</div><textarea id="shCode" class="ed-input" rows="3" readonly>' + escHtml(code) + "</textarea>";
+    html += '<button class="ed-btn" data-act="copycode">Copy code</button>';
+    $("setsPanel").innerHTML = html;
+  }
+  function renderImportView() {
+    let html = '<div class="ed-head"><h4>Import a set</h4><button class="ed-btn" data-act="back">← Back to sets</button></div>';
+    html += '<p class="ed-hint">Paste a shared link or code below, then Import. The set is copied into your own list.</p>';
+    html += '<textarea id="imText" class="ed-input" rows="4" placeholder="Paste a shared link or code here"></textarea>';
+    html += '<button class="ed-btn primary" data-act="doimport">Import</button><div id="imErr" class="ed-err"></div>';
     $("setsPanel").innerHTML = html;
   }
   function optionRows() {
@@ -1964,15 +2036,25 @@
     if (!btn) return;
     const act = btn.dataset.act;
     const sets = loadSets();
-    if (act === "new") { const s = { id: uid(), name: "New set", questions: [] }; sets.push(s); saveSets(sets); editingId = s.id; _samples = []; renderSets(); }
-    else if (act === "edit") { editingId = btn.dataset.id; _samples = []; renderSets(); }
-    else if (act === "back") { editingId = null; _samples = []; renderSets(); }
+    if (act === "new") { const s = { id: uid(), name: "New set", questions: [] }; sets.push(s); saveSets(sets); editingId = s.id; sharingId = null; importing = false; _samples = []; renderSets(); }
+    else if (act === "edit") { editingId = btn.dataset.id; sharingId = null; importing = false; _samples = []; renderSets(); }
+    else if (act === "back") { editingId = null; sharingId = null; importing = false; _samples = []; renderSets(); }
     else if (act === "del") { if (window.confirm("Delete this set? This cannot be undone.")) { saveSets(sets.filter((x) => x.id !== btn.dataset.id)); renderSets(); } }
     else if (act === "play") { const s = sets.find((x) => x.id === btn.dataset.id); if (s && s.questions.length) startCustomGame(s); }
     else if (act === "delq") { const s = sets.find((x) => x.id === editingId); if (s) { s.questions.splice(+btn.dataset.qi, 1); saveSets(sets); renderSets(); } }
     else if (act === "addq") { addQuestionFromForm(); }
     else if (act === "gen") { generateSamples(); renderSets(); }
     else if (act === "addsample") { const s = sets.find((x) => x.id === editingId); const smp = _samples[+btn.dataset.si]; if (s && smp) { s.questions.push({ text: smp.text, options: smp.options.slice(), correct: smp.correct, explain: smp.explain }); saveSets(sets); _samples.splice(+btn.dataset.si, 1); renderSets(); } }
+    else if (act === "share") { sharingId = btn.dataset.id; editingId = null; importing = false; renderSets(); }
+    else if (act === "import") { importing = true; editingId = null; sharingId = null; renderSets(); }
+    else if (act === "copylink") { copyText($("shLink").value); btn.textContent = "Copied ✓"; }
+    else if (act === "copycode") { copyText($("shCode").value); btn.textContent = "Copied ✓"; }
+    else if (act === "doimport") {
+      const raw = $("imText").value.trim();
+      if (!raw) { $("imErr").textContent = "Paste a shared link or code first."; return; }
+      try { const set = decodeSet(raw); sets.push(set); saveSets(sets); importing = false; _flash = "Imported “" + set.name + "” (" + set.questions.length + " questions)."; renderSets(); }
+      catch (err) { $("imErr").textContent = "That doesn't look like a valid MathHoot set link or code."; }
+    }
   });
   $("setsPanel").addEventListener("input", (e) => {
     if (e.target.id === "edName") { const sets = loadSets(); const s = sets.find((x) => x.id === editingId); if (s) { s.name = e.target.value; saveSets(sets); } }
@@ -1982,6 +2064,7 @@
     else if (e.target.id === "pkType") _picker.type = e.target.value;
     else if (e.target.id === "pkLevel") _picker.level = +e.target.value;
   });
+  maybeImportFromUrl();
 
   validate();
 })();
