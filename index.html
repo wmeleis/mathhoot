@@ -364,6 +364,9 @@
   .opt-row input[type=text]:focus { border-color: var(--purple); outline: none; }
   .ed-err { color: var(--red); font-size: 13px; font-weight: 600; margin-top: 6px; min-height: 16px; }
   .ed-hint { font-size: 12px; color: #888; margin: 4px 0 8px; }
+  .pick-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; align-items: center; }
+  .ed-select { font-size: 13px; padding: 7px 8px; border: 2px solid #ddd; border-radius: 8px; background: #fff; font-family: inherit; }
+  .ed-select:focus { border-color: var(--purple); outline: none; }
 
   .hidden { display: none !important; }
 </style>
@@ -1805,6 +1808,48 @@
   function uid() { return "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
   function escHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
+  // Problem picker — build a set by choosing specific generated / bank problems.
+  let _picker = { topic: "arithmetic", level: 2, type: "numeric" };
+  let _samples = [];
+  function sampleProblem(topic, L, type) {
+    let text, answer, options;
+    if (type === "concept") {
+      let src = CONCEPT_BANK.filter((e) => e.t === topic && (e.L === L || e.L === L - 1));
+      if (!src.length) src = CONCEPT_BANK.filter((e) => e.t === topic);
+      if (!src.length) return null;
+      const e = pick(src), q = finalize({ text: e.q, answer: e.a, options: e.d.slice() });
+      text = q.text; answer = q.answer; options = q.options;
+    } else if (type === "truefalse") {
+      let src = TRUEFALSE_BANK.filter((e) => e.t === topic && (e.L === L || e.L === L - 1));
+      if (!src.length) src = TRUEFALSE_BANK.filter((e) => e.t === topic);
+      if (!src.length) return null;
+      const e = pick(src); text = e.q; answer = e.a; options = ["True", "False"];
+    } else {
+      let q; try { q = finalize(GEN[topic](L)); } catch (err) { return null; }
+      text = q.text; answer = q.answer; options = q.options;
+    }
+    const opt = options.map(String), correct = opt.indexOf(String(answer));
+    if (correct < 0) return null;
+    return { text: text, options: opt, correct: correct, explain: khanFor(topic, text)[2] || "" };
+  }
+  function generateSamples() {
+    const out = [], seen = {};
+    for (let i = 0; i < 80 && out.length < 6; i++) {
+      const s = sampleProblem(_picker.topic, _picker.level, _picker.type);
+      if (s && !seen[s.text]) { seen[s.text] = 1; out.push(s); }
+    }
+    _samples = out;
+  }
+  function samplesHtml() {
+    if (!_samples.length) return '<p class="ed-hint">Choose a topic, difficulty, and type, then Generate to preview problems you can add.</p>';
+    return _samples.map((s, i) =>
+      '<div class="q-card"><div class="q-card-top"><b>Sample</b><button class="ed-btn primary sm" data-act="addsample" data-si="' + i + '">+ Add</button></div>' +
+      '<div class="q-text">' + escHtml(s.text) + '</div><ul class="q-opts">' +
+      s.options.map((o, oi) => "<li" + (oi === s.correct ? ' class="correct"' : "") + ">" + (oi === s.correct ? "✓ " : "") + escHtml(o) + "</li>").join("") +
+      "</ul></div>"
+    ).join("");
+  }
+
   function renderSets() {
     const sets = loadSets();
     if (editingId) {
@@ -1854,6 +1899,15 @@
       '<input id="nfExplain" class="ed-input" type="text" placeholder="Explanation (optional — shown in the review)">' +
       '<button class="ed-btn primary" data-act="addq">Add question</button>' +
       '<div id="nfErr" class="ed-err"></div></div>';
+    html += '<div class="q-form"><h5>Add from MathHoot\'s question bank</h5>' +
+      '<div class="pick-controls">' +
+      '<select id="pkTopic" class="ed-select">' + TOPIC_ORDER.map((t) => '<option value="' + t + '"' + (t === _picker.topic ? " selected" : "") + ">" + TOPIC_LABEL[t] + "</option>").join("") + "</select>" +
+      '<select id="pkLevel" class="ed-select">' + [1, 2, 3, 4, 5].map((l) => '<option value="' + l + '"' + (l === _picker.level ? " selected" : "") + ">" + LEVEL_NAME[l - 1] + "</option>").join("") + "</select>" +
+      '<select id="pkType" class="ed-select">' + [["numeric", "Numerical"], ["concept", "Conceptual"], ["truefalse", "True / False"]].map((o) => '<option value="' + o[0] + '"' + (o[0] === _picker.type ? " selected" : "") + ">" + o[1] + "</option>").join("") + "</select>" +
+      '<button class="ed-btn" data-act="gen">Generate samples</button>' +
+      "</div>" +
+      '<div id="pkSamples">' + samplesHtml() + "</div>" +
+      "</div>";
     $("setsPanel").innerHTML = html;
   }
   function addQuestionFromForm() {
@@ -1902,7 +1956,7 @@
   $("setsToggle").addEventListener("click", () => {
     const panel = $("setsPanel");
     const hidden = panel.classList.toggle("hidden");
-    if (!hidden) { editingId = null; renderSets(); }
+    if (!hidden) { editingId = null; _samples = []; renderSets(); }
     $("setsToggle").textContent = hidden ? "✏️ Create / edit question sets" : "✏️ Hide question sets";
   });
   $("setsPanel").addEventListener("click", (e) => {
@@ -1910,16 +1964,23 @@
     if (!btn) return;
     const act = btn.dataset.act;
     const sets = loadSets();
-    if (act === "new") { const s = { id: uid(), name: "New set", questions: [] }; sets.push(s); saveSets(sets); editingId = s.id; renderSets(); }
-    else if (act === "edit") { editingId = btn.dataset.id; renderSets(); }
-    else if (act === "back") { editingId = null; renderSets(); }
+    if (act === "new") { const s = { id: uid(), name: "New set", questions: [] }; sets.push(s); saveSets(sets); editingId = s.id; _samples = []; renderSets(); }
+    else if (act === "edit") { editingId = btn.dataset.id; _samples = []; renderSets(); }
+    else if (act === "back") { editingId = null; _samples = []; renderSets(); }
     else if (act === "del") { if (window.confirm("Delete this set? This cannot be undone.")) { saveSets(sets.filter((x) => x.id !== btn.dataset.id)); renderSets(); } }
     else if (act === "play") { const s = sets.find((x) => x.id === btn.dataset.id); if (s && s.questions.length) startCustomGame(s); }
     else if (act === "delq") { const s = sets.find((x) => x.id === editingId); if (s) { s.questions.splice(+btn.dataset.qi, 1); saveSets(sets); renderSets(); } }
     else if (act === "addq") { addQuestionFromForm(); }
+    else if (act === "gen") { generateSamples(); renderSets(); }
+    else if (act === "addsample") { const s = sets.find((x) => x.id === editingId); const smp = _samples[+btn.dataset.si]; if (s && smp) { s.questions.push({ text: smp.text, options: smp.options.slice(), correct: smp.correct, explain: smp.explain }); saveSets(sets); _samples.splice(+btn.dataset.si, 1); renderSets(); } }
   });
   $("setsPanel").addEventListener("input", (e) => {
     if (e.target.id === "edName") { const sets = loadSets(); const s = sets.find((x) => x.id === editingId); if (s) { s.name = e.target.value; saveSets(sets); } }
+  });
+  $("setsPanel").addEventListener("change", (e) => {
+    if (e.target.id === "pkTopic") _picker.topic = e.target.value;
+    else if (e.target.id === "pkType") _picker.type = e.target.value;
+    else if (e.target.id === "pkLevel") _picker.level = +e.target.value;
   });
 
   validate();
