@@ -1155,17 +1155,16 @@
 
   // Concept pool for the chosen level, scoped to selected topics where possible.
   function conceptPool(L) {
-    const band = CONCEPT_BANK.filter((e) => e.L === L || e.L === L - 1);
+    // Respect the selected topics strictly: prefer this level band, then those
+    // topics at any level. Only if the selection has zero concepts do we widen.
     if (cfg.topics.length) {
-      const bandT = band.filter((e) => cfg.topics.includes(e.t));
-      if (bandT.length >= 3) return bandT;
-      const allT = CONCEPT_BANK.filter((e) => e.L <= L && cfg.topics.includes(e.t));
-      if (allT.length >= 3) return allT;
-      // selected topics have too few concepts → widen to the whole level band
+      const band = CONCEPT_BANK.filter((e) => cfg.topics.includes(e.t) && (e.L === L || e.L === L - 1));
+      if (band.length) return band;
+      const any = CONCEPT_BANK.filter((e) => cfg.topics.includes(e.t));
+      if (any.length) return any;
     }
-    if (band.length >= 3) return band;
-    const all = CONCEPT_BANK.filter((e) => e.L <= L);
-    return all.length ? all : CONCEPT_BANK;
+    const band = CONCEPT_BANK.filter((e) => e.L === L || e.L === L - 1);
+    return band.length ? band : CONCEPT_BANK;
   }
 
   // ---- True / False statements — tagged by topic (t) and level (L). a is the
@@ -1253,16 +1252,14 @@
 
   // Same level-band + topic-scoping logic as conceptPool, over the T/F bank.
   function truefalsePool(L) {
-    const band = TRUEFALSE_BANK.filter((e) => e.L === L || e.L === L - 1);
     if (cfg.topics.length) {
-      const bandT = band.filter((e) => cfg.topics.includes(e.t));
-      if (bandT.length >= 3) return bandT;
-      const allT = TRUEFALSE_BANK.filter((e) => e.L <= L && cfg.topics.includes(e.t));
-      if (allT.length >= 3) return allT;
+      const band = TRUEFALSE_BANK.filter((e) => cfg.topics.includes(e.t) && (e.L === L || e.L === L - 1));
+      if (band.length) return band;
+      const any = TRUEFALSE_BANK.filter((e) => cfg.topics.includes(e.t));
+      if (any.length) return any;
     }
-    if (band.length >= 3) return band;
-    const all = TRUEFALSE_BANK.filter((e) => e.L <= L);
-    return all.length ? all : TRUEFALSE_BANK;
+    const band = TRUEFALSE_BANK.filter((e) => e.L === L || e.L === L - 1);
+    return band.length ? band : TRUEFALSE_BANK;
   }
 
   const GEN = {
