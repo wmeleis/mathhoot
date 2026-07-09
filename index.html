@@ -369,9 +369,20 @@
   .ed-select:focus { border-color: var(--purple); outline: none; }
   .ed-flash { background: #eaf6e8; border: 1px solid var(--green); color: #1e5e12; font-size: 13px; font-weight: 700; padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; }
   .sh-label { font-size: 12px; font-weight: 700; color: #666; text-transform: uppercase; letter-spacing: .3px; margin: 10px 0 4px; }
+  .acct-info b { display: block; color: var(--ink); }
+  .acct-info span { font-size: 13px; color: #666; }
+  .acct-actions { display: flex; gap: 8px; margin: 8px 0; }
+  .hist-stats { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+  .hist-acc { font-weight: 800; font-size: 15px; }
+  .hist-acc.good { color: var(--green); } .hist-acc.ok { color: var(--yellow); } .hist-acc.bad { color: var(--red); }
+  .hist-sc { font-size: 13px; color: #666; }
 
   .hidden { display: none !important; }
 </style>
+<!-- Firebase (cloud accounts). Loaded from CDN; if unreachable, the app runs in local-only mode. -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 </head>
 <body>
 <div class="wrap">
@@ -465,6 +476,12 @@
 
     <button id="setsToggle" class="catalog-toggle" type="button">✏️ Create / edit question sets</button>
     <div id="setsPanel" class="catalog hidden"></div>
+
+    <button id="acctToggle" class="catalog-toggle" type="button">👤 Sign in / create account</button>
+    <div id="acctPanel" class="catalog hidden"></div>
+
+    <button id="historyToggle" class="catalog-toggle" type="button">🏆 Game history</button>
+    <div id="historyPanel" class="catalog hidden"></div>
   </div>
 
   <!-- ============ GAME ============ -->
@@ -516,6 +533,31 @@
     scoring: "time", // "time" | "count"
     qtypes: ["numeric"], // multi-select: any of "numeric", "concept", "truefalse"
   };
+
+  // ---------- Cloud accounts (Firebase) ----------
+  // Public client config (safe to embed). If the SDK failed to load or the
+  // config is blank, firebaseReady stays false and everything runs local-only.
+  const FIREBASE_CONFIG = {
+    apiKey: "AIzaSyDAJ734FlLoW0sAg7J1MGbwbR8tafQD3U8",
+    authDomain: "mathhoot.firebaseapp.com",
+    projectId: "mathhoot",
+    storageBucket: "mathhoot.firebasestorage.app",
+    messagingSenderId: "919703718413",
+    appId: "1:919703718413:web:05ede599a4e4034aede344",
+  };
+  let fbAuth = null, fbDb = null, firebaseReady = false;
+  let currentUser = null;   // signed-in Firebase user, or null
+  let cloudDoc = null;      // cached { sets, history, prefs } while signed in
+  let _cloudTimer = null;   // debounce handle for cloud writes
+  try {
+    if (typeof firebase !== "undefined" && FIREBASE_CONFIG.apiKey) {
+      firebase.initializeApp(FIREBASE_CONFIG);
+      fbAuth = firebase.auth();
+      fbDb = firebase.firestore();
+      firebaseReady = true;
+    }
+  } catch (e) { firebaseReady = false; }
+  function loggedIn() { return !!(firebaseReady && currentUser && cloudDoc); }
 
   const LVL = { easy: 1, medium: 2, hard: 3, expert: 4, college: 5 };
 
@@ -570,12 +612,13 @@
   wireMulti("qtype", "qtypes", "qtype");
   wireSingle("scoring", "scoring", "score");
 
-  $("player").addEventListener("input", (e) => { cfg.name = e.target.value.trim() || "Player"; });
+  $("player").addEventListener("input", (e) => { cfg.name = e.target.value.trim() || "Player"; persistPrefs(); });
 
   function validate() {
     // need ≥1 question type; numerical questions also need ≥1 topic
     const needsTopic = cfg.qtypes.indexOf("numeric") >= 0;
     $("startBtn").disabled = cfg.qtypes.length === 0 || (needsTopic && cfg.topics.length === 0);
+    persistPrefs();
   }
 
   // ============================================================
@@ -1534,6 +1577,17 @@
     const total = gameLen;
     const acc = total ? Math.round((correctCount / total) * 100) : 0;
 
+    // ----- Record this game in history -----
+    let histLabel;
+    if (customActive) { histLabel = (questions[0] && questions[0].sub) || "Custom set"; }
+    else {
+      const ts = cfg.topics.map((t) => TOPIC_LABEL[t] || t);
+      const topicStr = ts.length ? ts.slice(0, 2).join(", ") + (ts.length > 2 ? " +" + (ts.length - 2) : "") : "Concepts";
+      const diffStr = cfg.diff === "adaptive" ? "Adaptive" : (LEVEL_NAME[(LVL[cfg.diff] || 2) - 1] || cfg.diff);
+      histLabel = topicStr + " · " + diffStr;
+    }
+    addHistory({ t: Date.now(), label: histLabel, score: (cfg.scoring === "count" ? correctCount : score), scoring: cfg.scoring, correct: correctCount, total: total, acc: acc });
+
     $("resWho").textContent = cfg.name;
     $("resScore").textContent = score;
     $("resUnit").textContent = cfg.scoring === "count" ? (score === 1 ? "correct" : "correct") : "pts";
@@ -1794,18 +1848,130 @@
   // localStorage may be blocked (e.g. opening the file via file:// in some
   // browsers). Fall back to an in-memory store so the editor still works in that
   // session; on a hosted https page it persists normally.
-  let _memSets = null, _lsOK = null;
+  let _lsOK = null;
+  const _memStore = {};
+  const HISTORY_KEY = "mathhoot.history.v1", PREFS_KEY = "mathhoot.prefs.v1";
   function lsAvailable() {
     if (_lsOK === null) { try { localStorage.setItem(SETS_KEY + ".t", "1"); localStorage.removeItem(SETS_KEY + ".t"); _lsOK = true; } catch (e) { _lsOK = false; } }
     return _lsOK;
   }
-  function loadSets() {
-    if (lsAvailable()) { try { return JSON.parse(localStorage.getItem(SETS_KEY)) || []; } catch (e) { return []; } }
-    return _memSets || (_memSets = []);
+  function loadLocal(key, dflt) {
+    if (lsAvailable()) { try { const v = JSON.parse(localStorage.getItem(key)); return v == null ? dflt : v; } catch (e) { return dflt; } }
+    return (key in _memStore) ? _memStore[key] : dflt;
   }
-  function saveSets(sets) {
-    if (lsAvailable()) { try { localStorage.setItem(SETS_KEY, JSON.stringify(sets)); return; } catch (e) {} }
-    _memSets = sets;
+  function saveLocal(key, val) {
+    if (lsAvailable()) { try { localStorage.setItem(key, JSON.stringify(val)); return; } catch (e) {} }
+    _memStore[key] = val;
+  }
+  // Store dispatches to the cloud doc when signed in, else to local storage.
+  function loadSets() { return loggedIn() ? (cloudDoc.sets || (cloudDoc.sets = [])) : loadLocal(SETS_KEY, []); }
+  function saveSets(sets) { if (loggedIn()) { cloudDoc.sets = sets; scheduleCloudWrite(); } else saveLocal(SETS_KEY, sets); }
+  function loadHistory() { return loggedIn() ? (cloudDoc.history || (cloudDoc.history = [])) : loadLocal(HISTORY_KEY, []); }
+  function saveHistory(h) { if (loggedIn()) { cloudDoc.history = h; scheduleCloudWrite(); } else saveLocal(HISTORY_KEY, h); }
+  function addHistory(entry) { const h = loadHistory().slice(); h.unshift(entry); if (h.length > 100) h.length = 100; saveHistory(h); }
+  function loadPrefs() { return loggedIn() ? (cloudDoc.prefs || null) : loadLocal(PREFS_KEY, null); }
+  function savePrefs(p) { if (loggedIn()) { cloudDoc.prefs = p; scheduleCloudWrite(); } else saveLocal(PREFS_KEY, p); }
+  // Preferences <-> setup UI.
+  let _prefsReady = false;
+  function snapshotPrefs() { return { name: cfg.name, topics: cfg.topics.slice(), qtypes: cfg.qtypes.slice(), diff: cfg.diff, count: cfg.count, pace: cfg.pace, scoring: cfg.scoring }; }
+  function persistPrefs() { if (_prefsReady) savePrefs(snapshotPrefs()); }
+  function setChips(containerId, attr, values) {
+    const vals = (Array.isArray(values) ? values : [values]).map(String);
+    $(containerId).querySelectorAll("[data-" + attr + "]").forEach((o) => o.classList.toggle("sel", vals.indexOf(o.dataset[attr]) >= 0));
+  }
+  function applyPrefs(p) {
+    if (!p) return;
+    if (p.name) { cfg.name = p.name; $("player").value = p.name; }
+    if (p.topics) { cfg.topics = p.topics.slice(); setChips("topics", "topic", p.topics); }
+    if (p.qtypes) { cfg.qtypes = p.qtypes.slice(); setChips("qtype", "qtype", p.qtypes); }
+    if (p.diff) { cfg.diff = p.diff; setChips("difficulty", "diff", p.diff); }
+    if (p.count) { cfg.count = p.count; setChips("count", "count", p.count); }
+    if (p.pace != null) { cfg.pace = p.pace; setChips("pace", "pace", p.pace); }
+    if (p.scoring) { cfg.scoring = p.scoring; setChips("scoring", "score", p.scoring); }
+    validate();
+  }
+
+  // ---------- Auth + cloud sync ----------
+  function scheduleCloudWrite() {
+    if (!loggedIn()) return;
+    if (_cloudTimer) clearTimeout(_cloudTimer);
+    _cloudTimer = setTimeout(() => {
+      _cloudTimer = null;
+      try { fbDb.collection("users").doc(currentUser.uid).set(cloudDoc, { merge: true }).catch(() => {}); } catch (e) {}
+    }, 600);
+  }
+  function normalizeDoc(d) {
+    d = d || {};
+    return { sets: Array.isArray(d.sets) ? d.sets : [], history: Array.isArray(d.history) ? d.history : [], prefs: d.prefs || null };
+  }
+  function onSignedIn(user) {
+    currentUser = user;
+    fbDb.collection("users").doc(user.uid).get().then((snap) => {
+      if (snap.exists) {
+        cloudDoc = normalizeDoc(snap.data());
+      } else {
+        cloudDoc = { sets: loadLocal(SETS_KEY, []), history: loadLocal(HISTORY_KEY, []), prefs: loadLocal(PREFS_KEY, null) };
+        try { fbDb.collection("users").doc(user.uid).set(cloudDoc); } catch (e) {}
+      }
+      applyPrefs(cloudDoc.prefs);
+      if (!cloudDoc.prefs) { cloudDoc.prefs = snapshotPrefs(); scheduleCloudWrite(); }
+      afterAuthChange();
+    }).catch(() => { cloudDoc = { sets: [], history: [], prefs: null }; afterAuthChange(); });
+  }
+  function onSignedOut() {
+    currentUser = null; cloudDoc = null;
+    applyPrefs(loadLocal(PREFS_KEY, null));
+    afterAuthChange();
+  }
+  function afterAuthChange() {
+    renderAccount();
+    if (!$("setsPanel").classList.contains("hidden")) { editingId = null; sharingId = null; importing = false; renderSets(); }
+    if (!$("historyPanel").classList.contains("hidden")) renderHistory();
+  }
+  function signUp(email, pw) { return fbAuth.createUserWithEmailAndPassword(email, pw); }
+  function logIn(email, pw) { return fbAuth.signInWithEmailAndPassword(email, pw); }
+  function logOut() { return fbAuth.signOut(); }
+  function authErrMsg(e) {
+    const c = (e && e.code) || "";
+    if (c.indexOf("email-already-in-use") >= 0) return "That email already has an account — try logging in instead.";
+    if (c.indexOf("invalid-email") >= 0) return "That doesn't look like a valid email address.";
+    if (c.indexOf("weak-password") >= 0) return "Password should be at least 6 characters.";
+    if (c.indexOf("wrong-password") >= 0 || c.indexOf("invalid-credential") >= 0 || c.indexOf("user-not-found") >= 0) return "Wrong email or password.";
+    if (c.indexOf("unauthorized-domain") >= 0) return "This site isn't authorized in Firebase yet (Auth → Settings → Authorized domains).";
+    if (c.indexOf("network") >= 0) return "Network error — check your connection.";
+    return (e && e.message) || "Something went wrong. Please try again.";
+  }
+  function renderAccount() {
+    const tog = $("acctToggle"), panel = $("acctPanel");
+    if (!firebaseReady) { tog.classList.add("hidden"); panel.classList.add("hidden"); return; }
+    if (currentUser) {
+      tog.textContent = "👤 " + (currentUser.email || "Signed in");
+      panel.innerHTML = '<div class="acct-info"><b>Signed in</b><span>' + escHtml(currentUser.email || "") + "</span></div>" +
+        '<p class="ed-hint">Your question sets, game history, and preferences are synced to this account — sign in on another device to see them there.</p>' +
+        '<button class="ed-btn danger" data-act="logout">Log out</button>';
+    } else {
+      tog.textContent = "👤 Sign in / create account";
+      panel.innerHTML = '<p class="ed-hint">Sign in to sync your question sets, game history, and preferences across devices.</p>' +
+        '<input id="acEmail" class="ed-input" type="email" placeholder="Email" autocomplete="username">' +
+        '<input id="acPw" class="ed-input" type="password" placeholder="Password (6+ characters)" autocomplete="current-password">' +
+        '<div class="acct-actions"><button class="ed-btn primary" data-act="login">Log in</button><button class="ed-btn" data-act="signup">Sign up</button></div>' +
+        '<div id="acErr" class="ed-err"></div>';
+    }
+  }
+  function renderHistory() {
+    const h = loadHistory();
+    let html = '<div class="ed-head"><h4>Game history</h4>' + (h.length ? '<button class="ed-btn" data-act="clearhist">Clear</button>' : "") + "</div>";
+    if (!h.length) html += '<p class="ed-hint">No games yet. Finish a quiz and your results appear here' + (firebaseReady && !currentUser ? " (sign in to keep them across devices)" : "") + ".</p>";
+    else html += h.map(historyRow).join("");
+    $("historyPanel").innerHTML = html;
+  }
+  function historyRow(e) {
+    const d = new Date(e.t);
+    const dateStr = d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) + " " + d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    const scoreStr = e.scoring === "count" ? (e.score + " correct") : (e.score + " pts");
+    const cls = e.acc >= 80 ? "good" : e.acc >= 50 ? "ok" : "bad";
+    return '<div class="set-row"><div class="set-info"><b>' + escHtml(e.label || "Quiz") + "</b><span>" + dateStr + "</span></div>" +
+      '<div class="hist-stats"><span class="hist-acc ' + cls + '">' + e.acc + '%</span><span class="hist-sc">' + escHtml(scoreStr) + "</span></div></div>";
   }
   function uid() { return "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
   function escHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
@@ -2064,7 +2230,38 @@
     else if (e.target.id === "pkType") _picker.type = e.target.value;
     else if (e.target.id === "pkLevel") _picker.level = +e.target.value;
   });
+  // Account panel
+  $("acctToggle").addEventListener("click", () => { const p = $("acctPanel"); const hidden = p.classList.toggle("hidden"); if (!hidden) renderAccount(); });
+  $("acctPanel").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-act]"); if (!btn) return;
+    const act = btn.dataset.act;
+    if (act === "login" || act === "signup") {
+      const email = $("acEmail").value.trim(), pw = $("acPw").value;
+      const err = $("acErr");
+      if (!email || !pw) { err.textContent = "Enter your email and a password."; return; }
+      btn.disabled = true; err.textContent = "Working…";
+      (act === "signup" ? signUp : logIn)(email, pw).then(() => { err.textContent = ""; }).catch((ex) => { err.textContent = authErrMsg(ex); btn.disabled = false; });
+    } else if (act === "logout") { logOut(); }
+  });
+  // History panel
+  $("historyToggle").addEventListener("click", () => {
+    const p = $("historyPanel"); const hidden = p.classList.toggle("hidden");
+    if (!hidden) renderHistory();
+    $("historyToggle").textContent = hidden ? "🏆 Game history" : "🏆 Hide history";
+  });
+  $("historyPanel").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-act]"); if (!btn) return;
+    if (btn.dataset.act === "clearhist" && window.confirm("Clear your game history?")) { saveHistory([]); renderHistory(); }
+  });
   maybeImportFromUrl();
+
+  // Restore saved preferences (local); if a Firebase session is active, the auth
+  // listener will load the cloud copy and override.
+  applyPrefs(loadPrefs());
+  _prefsReady = true;
+  if (!firebaseReady) { $("acctToggle").classList.add("hidden"); }
+  renderAccount();
+  if (firebaseReady) fbAuth.onAuthStateChanged((u) => { u ? onSignedIn(u) : onSignedOut(); });
 
   validate();
 })();
