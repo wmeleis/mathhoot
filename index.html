@@ -338,6 +338,20 @@
   .cat-table td.tot { font-weight: 800; color: var(--ink); }
   .cat-table tr.foot th, .cat-table tr.foot td { border-top: 2px solid #ddd; font-weight: 800; color: var(--ink); }
   .cat-note { font-size: 12px; color: #888; line-height: 1.5; margin-top: -6px; }
+  .cat-num { font: inherit; color: var(--purple); font-weight: 700; background: none; border: none;
+    cursor: pointer; padding: 2px 6px; border-radius: 6px; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
+  .cat-num:hover { background: #f0e9ff; text-decoration: none; }
+  .cat-num:focus-visible { outline: 2px solid var(--purple); outline-offset: 1px; }
+  .cat-detail { margin-top: 14px; background: #faf8ff; border: 1px solid #e5dcff; border-radius: 10px; padding: 14px 16px; }
+  .cat-detail-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .cat-detail-head b { font-size: 14px; color: #333; }
+  .cat-detail-head span { font-size: 12px; font-weight: 700; color: var(--purple); }
+  .cat-detail-x { margin-left: auto; background: none; border: none; color: #999; font-size: 15px; cursor: pointer; padding: 2px 6px; line-height: 1; }
+  .cat-detail-x:hover { color: #333; }
+  .cat-tpl { margin: 8px 0 0; padding-left: 22px; display: grid; gap: 8px; }
+  .cat-tpl li { font-size: 13px; color: #333; }
+  .cat-tpl-q { display: block; }
+  .cat-tpl-a { display: inline-block; margin-top: 3px; font-size: 12px; font-weight: 700; color: var(--green); background: #eaf6e8; border-radius: 6px; padding: 1px 8px; }
 
   /* ---------- Question-set editor ---------- */
   .ed-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
@@ -698,8 +712,15 @@
   }
   // each generator builds an array V of variant thunks valid for the level,
   // then one is picked at random — this is where per-level variety lives.
-  let _lastVariantCount = 0;
-  function build(sub, V) { _lastVariantCount = new Set(V).size; return Object.assign(pick(V)(), { sub: sub }); }
+  let _lastVariantCount = 0, _forceVariant = -1;
+  function build(sub, V) {
+    const uniq = Array.from(new Set(V));
+    _lastVariantCount = uniq.length;
+    // When _forceVariant is set (catalog "view templates"), pick that specific
+    // distinct template so callers can enumerate one example of each.
+    const fn = (_forceVariant >= 0 && _forceVariant < uniq.length) ? uniq[_forceVariant] : pick(V);
+    return Object.assign(fn(), { sub: sub });
+  }
 
   // ---- Arithmetic ----
   function gArith(L) {
@@ -1864,7 +1885,10 @@
     let rows = "";
     TOPIC_ORDER.forEach((t) => {
       let rowTot = 0, cells = "";
-      for (let L = 1; L <= 5; L++) { const v = data[t][key][L] || 0; rowTot += v; colTot[L] += v; cells += "<td>" + (v || "·") + "</td>"; }
+      for (let L = 1; L <= 5; L++) {
+        const v = data[t][key][L] || 0; rowTot += v; colTot[L] += v;
+        cells += "<td>" + (v ? "<button class='cat-num' type='button' data-cat='" + t + "|" + L + "|" + key + "'>" + v + "</button>" : "·") + "</td>";
+      }
       grand += rowTot;
       rows += "<tr><th>" + TOPIC_LABEL[t] + "</th>" + cells + "<td class='tot'>" + rowTot + "</td></tr>";
     });
@@ -1875,13 +1899,52 @@
       "<table class='cat-table'><thead><tr><th>Topic</th><th>Easy</th><th>Med</th><th>Hard</th><th>Expert</th><th>College</th><th class='tot'>Total</th></tr></thead>" +
       "<tbody>" + rows + foot + "</tbody></table></div>";
   }
+  const LEVEL_LABEL = ["", "Easy", "Medium", "Hard", "Expert", "College"];
+  const CAT_KIND = { numeric: "Numerical", concept: "Conceptual", truefalse: "True / False" };
+  // Returns example questions for one topic × level × type cell. Numerical
+  // enumerates one instance of each distinct template (numbers still randomize);
+  // conceptual/true-false list the actual bank entries at that level.
+  function catalogSamples(topic, L, type) {
+    const out = [], seen = {};
+    if (type === "numeric") {
+      const savedTopics = cfg.topics;
+      let n = 0; try { GEN[topic](L); n = _lastVariantCount; } catch (e) { n = 0; }
+      for (let i = 0; i < n; i++) {
+        _forceVariant = i;
+        try { const q = finalize(GEN[topic](L)); if (!seen[q.text]) { seen[q.text] = 1; out.push({ text: q.text, answer: String(q.answer) }); } } catch (e) {}
+      }
+      _forceVariant = -1; cfg.topics = savedTopics;
+    } else if (type === "concept") {
+      CONCEPT_BANK.filter((e) => e.t === topic && e.L === L).forEach((e) => { if (!seen[e.q]) { seen[e.q] = 1; out.push({ text: e.q, answer: String(e.a) }); } });
+    } else {
+      TRUEFALSE_BANK.filter((e) => e.t === topic && e.L === L).forEach((e) => { if (!seen[e.q]) { seen[e.q] = 1; out.push({ text: e.q, answer: String(e.a) }); } });
+    }
+    return out;
+  }
+  function renderCatDetail(topic, L, type) {
+    const el = $("catDetail"); if (!el) return;
+    const rows = catalogSamples(topic, L, type);
+    const head = "<div class='cat-detail-head'><b>" + escHtml(TOPIC_LABEL[topic]) + " · " + LEVEL_LABEL[L] + " · " + CAT_KIND[type] + "</b>" +
+      "<span>" + rows.length + " template" + (rows.length === 1 ? "" : "s") + "</span>" +
+      "<button class='cat-detail-x' type='button' data-cat-close='1' aria-label='Close'>✕</button></div>";
+    const note = type === "numeric"
+      ? "<p class='cat-note'>One example of each template — the numbers randomize every time you play.</p>"
+      : "<p class='cat-note'>The exact questions in this bank at this level.</p>";
+    const list = rows.length
+      ? "<ol class='cat-tpl'>" + rows.map((r) => "<li><span class='cat-tpl-q'>" + escHtml(r.text) + "</span><span class='cat-tpl-a'>✓ " + escHtml(r.answer) + "</span></li>").join("") + "</ol>"
+      : "<p class='cat-note'>No templates found at this level.</p>";
+    el.innerHTML = head + note + list;
+    el.classList.remove("hidden");
+    el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
   function renderCatalog() {
     const data = computeCatalog();
     $("catalogBody").innerHTML =
       catalogTable("Numerical — question templates", "numeric", data) +
       catalogTable("Conceptual — questions in bank", "concept", data) +
       catalogTable("True / False — statements in bank", "truefalse", data) +
-      "<p class='cat-note'>Numerical figures count distinct question <em>templates</em> per level; each template also randomizes its numbers, so the playable variety is far larger. Conceptual and True/False figures count distinct questions in their banks. A “·” means none at that level.</p>";
+      "<p class='cat-note'>Numerical figures count distinct question <em>templates</em> per level; each template also randomizes its numbers, so the playable variety is far larger. Conceptual and True/False figures count distinct questions in their banks. <b>Tap any number to see its question templates.</b> A “·” means none at that level.</p>" +
+      "<div id='catDetail' class='cat-detail hidden'></div>";
   }
 
   // ---------- Question-set editor ----------
@@ -2591,6 +2654,12 @@
     const hidden = panel.classList.toggle("hidden");
     if (!hidden) renderCatalog();
     $("catalogToggle").textContent = hidden ? "📊 Show question catalog" : "📊 Hide question catalog";
+  });
+  $("catalogBody").addEventListener("click", (e) => {
+    if (e.target.closest("[data-cat-close]")) { const d = $("catDetail"); if (d) d.classList.add("hidden"); return; }
+    const b = e.target.closest(".cat-num"); if (!b) return;
+    const parts = (b.dataset.cat || "").split("|");
+    if (parts.length === 3) renderCatDetail(parts[0], +parts[1], parts[2]);
   });
   // Review explanations: per-row toggle, plus Show all / Hide all controls.
   $("review").addEventListener("click", (e) => {
