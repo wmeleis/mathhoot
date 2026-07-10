@@ -1861,13 +1861,15 @@
     _memStore[key] = val;
   }
   // Store dispatches to the cloud doc when signed in, else to local storage.
+  // Every save writes to local storage too, so signed-in data survives logout
+  // and cloud outages; when signed in it also updates the cloud doc + syncs.
   function loadSets() { return loggedIn() ? (cloudDoc.sets || (cloudDoc.sets = [])) : loadLocal(SETS_KEY, []); }
-  function saveSets(sets) { if (loggedIn()) { cloudDoc.sets = sets; scheduleCloudWrite(); } else saveLocal(SETS_KEY, sets); }
+  function saveSets(sets) { saveLocal(SETS_KEY, sets); if (loggedIn()) { cloudDoc.sets = sets; scheduleCloudWrite(); } }
   function loadHistory() { return loggedIn() ? (cloudDoc.history || (cloudDoc.history = [])) : loadLocal(HISTORY_KEY, []); }
-  function saveHistory(h) { if (loggedIn()) { cloudDoc.history = h; scheduleCloudWrite(); } else saveLocal(HISTORY_KEY, h); }
+  function saveHistory(h) { saveLocal(HISTORY_KEY, h); if (loggedIn()) { cloudDoc.history = h; scheduleCloudWrite(); } }
   function addHistory(entry) { const h = loadHistory().slice(); h.unshift(entry); if (h.length > 100) h.length = 100; saveHistory(h); }
   function loadPrefs() { return loggedIn() ? (cloudDoc.prefs || null) : loadLocal(PREFS_KEY, null); }
-  function savePrefs(p) { if (loggedIn()) { cloudDoc.prefs = p; scheduleCloudWrite(); } else saveLocal(PREFS_KEY, p); }
+  function savePrefs(p) { saveLocal(PREFS_KEY, p); if (loggedIn()) { cloudDoc.prefs = p; scheduleCloudWrite(); } }
   // Preferences <-> setup UI.
   let _prefsReady = false;
   function snapshotPrefs() { return { name: cfg.name, topics: cfg.topics.slice(), qtypes: cfg.qtypes.slice(), diff: cfg.diff, count: cfg.count, pace: cfg.pace, scoring: cfg.scoring }; }
@@ -1901,19 +1903,45 @@
     d = d || {};
     return { sets: Array.isArray(d.sets) ? d.sets : [], history: Array.isArray(d.history) ? d.history : [], prefs: d.prefs || null };
   }
+  function mergeHistory(a, b) {
+    const seen = {}, out = [];
+    (a || []).concat(b || []).forEach((e) => { if (!e) return; const k = e.t + "|" + (e.label || ""); if (!seen[k]) { seen[k] = 1; out.push(e); } });
+    out.sort((x, y) => (y.t || 0) - (x.t || 0));
+    if (out.length > 100) out.length = 100;
+    return out;
+  }
+  function mergeSets(cloud, local) {
+    const map = {}, order = [];
+    (cloud || []).forEach((s) => { if (s && !(s.id in map)) { order.push(s.id); } if (s) map[s.id] = s; });
+    (local || []).forEach((s) => { if (s && !(s.id in map)) { order.push(s.id); map[s.id] = s; } });
+    return order.map((id) => map[id]);
+  }
+  function mirrorToLocal() {
+    if (!cloudDoc) return;
+    saveLocal(SETS_KEY, cloudDoc.sets);
+    saveLocal(HISTORY_KEY, cloudDoc.history);
+    saveLocal(PREFS_KEY, cloudDoc.prefs);
+  }
   function onSignedIn(user) {
     currentUser = user;
+    const local = { sets: loadLocal(SETS_KEY, []), history: loadLocal(HISTORY_KEY, []), prefs: loadLocal(PREFS_KEY, null) };
     fbDb.collection("users").doc(user.uid).get().then((snap) => {
-      if (snap.exists) {
-        cloudDoc = normalizeDoc(snap.data());
-      } else {
-        cloudDoc = { sets: loadLocal(SETS_KEY, []), history: loadLocal(HISTORY_KEY, []), prefs: loadLocal(PREFS_KEY, null) };
-        try { fbDb.collection("users").doc(user.uid).set(cloudDoc); } catch (e) {}
-      }
+      const cloud = snap.exists ? normalizeDoc(snap.data()) : { sets: [], history: [], prefs: null };
+      // Merge cloud + local so nothing is lost in either direction.
+      cloudDoc = {
+        sets: mergeSets(cloud.sets, local.sets),
+        history: mergeHistory(cloud.history, local.history),
+        prefs: cloud.prefs || local.prefs || snapshotPrefs(),
+      };
+      mirrorToLocal();
       applyPrefs(cloudDoc.prefs);
-      if (!cloudDoc.prefs) { cloudDoc.prefs = snapshotPrefs(); scheduleCloudWrite(); }
+      scheduleCloudWrite();
       afterAuthChange();
-    }).catch(() => { cloudDoc = { sets: [], history: [], prefs: null }; afterAuthChange(); });
+    }).catch(() => {
+      // Cloud unavailable — keep working from local so nothing is lost.
+      cloudDoc = { sets: local.sets, history: local.history, prefs: local.prefs || snapshotPrefs() };
+      afterAuthChange();
+    });
   }
   function onSignedOut() {
     currentUser = null; cloudDoc = null;
