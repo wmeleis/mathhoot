@@ -1502,7 +1502,10 @@
     qt.style.fontSize = len > 32 ? "clamp(20px, 4.6vw, 32px)"
                       : len > 18 ? "clamp(26px, 6.5vw, 44px)"
                       :            "clamp(34px, 9vw, 60px)";
-    $("qSub").textContent = (q.sub || "") + (!customActive && cfg.diff === "adaptive" ? " · " + LEVEL_NAME[(q._level || 2) - 1] : "");
+    // Always surface the actual difficulty of each question (not just in Adaptive)
+    // so the selected level is visible during play — q._level is the real level
+    // the question was generated at.
+    $("qSub").textContent = (q.sub || "") + (!customActive ? " · " + (cfg.diff === "adaptive" ? "Adaptive · " : "") + LEVEL_NAME[(q._level || 2) - 1] : "");
     $("feedback").textContent = "";
 
     const ans = $("answers");
