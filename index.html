@@ -504,6 +504,9 @@
     <button id="historyToggle" class="catalog-toggle" type="button">🏆 Game history</button>
     <div id="historyPanel" class="catalog hidden"></div>
 
+    <button id="recToggle" class="catalog-toggle hidden" type="button">🎯 Recommendations</button>
+    <div id="recPanel" class="catalog hidden"></div>
+
     <div id="liveEntry"></div>
   </div>
 
@@ -1610,7 +1613,10 @@
       const diffStr = cfg.diff === "adaptive" ? "Adaptive" : (LEVEL_NAME[(LVL[cfg.diff] || 2) - 1] || cfg.diff);
       histLabel = topicStr + " · " + diffStr;
     }
-    addHistory({ t: Date.now(), label: histLabel, score: (cfg.scoring === "count" ? correctCount : score), scoring: cfg.scoring, correct: correctCount, total: total, acc: acc });
+    // Per-topic breakdown (real topics only) so recommendations can learn from it.
+    const histSubjects = {};
+    review.forEach((r) => { const s = r.subject; if (TOPIC_ORDER.indexOf(s) >= 0) { histSubjects[s] = histSubjects[s] || { c: 0, t: 0 }; histSubjects[s].t++; if (r.correct) histSubjects[s].c++; } });
+    addHistory({ t: Date.now(), label: histLabel, score: (cfg.scoring === "count" ? correctCount : score), scoring: cfg.scoring, correct: correctCount, total: total, acc: acc, subjects: histSubjects });
 
     $("resWho").textContent = cfg.name;
     $("resScore").textContent = score;
@@ -1931,6 +1937,7 @@
     return { sets: Array.isArray(d.sets) ? d.sets : [], history: Array.isArray(d.history) ? d.history : [], prefs: d.prefs || null, role: d.role || null };
   }
   function isTeacher() { return loggedIn() && cloudDoc.role === "teacher"; }
+  function isStudent() { return loggedIn() && cloudDoc.role === "student"; }
   function mergeHistory(a, b) {
     const seen = {}, out = [];
     (a || []).concat(b || []).forEach((e) => { if (!e) return; const k = e.t + "|" + (e.label || ""); if (!seen[k]) { seen[k] = 1; out.push(e); } });
@@ -2021,11 +2028,72 @@
     renderLiveEntry();
   }
   function renderLiveEntry() {
+    updateRecVisibility();
     const el = $("liveEntry"); if (!el) return;
     if (!loggedIn()) { el.innerHTML = ""; return; }
     el.innerHTML = isTeacher()
       ? '<button class="catalog-toggle live-entry" data-live="host" type="button">🎓 Host a live game</button>'
       : '<button class="catalog-toggle live-entry" data-live="join" type="button">🙋 Join a live game</button>';
+  }
+
+  // ---------- Recommendations (student accounts) ----------
+  let _lastRecSet = null;
+  function computeTopicStats() {
+    const st = {};
+    loadHistory().forEach((e) => {
+      const subj = e.subjects || {};
+      Object.keys(subj).forEach((t) => {
+        if (TOPIC_ORDER.indexOf(t) < 0) return;
+        st[t] = st[t] || { correct: 0, total: 0 };
+        st[t].correct += subj[t].c || 0;
+        st[t].total += subj[t].t || 0;
+      });
+    });
+    return st;
+  }
+  function weakTopics(minAttempts, maxAcc) {
+    const st = computeTopicStats(), out = [];
+    TOPIC_ORDER.forEach((t) => { const s = st[t]; if (s && s.total >= minAttempts) { const acc = s.correct / s.total; if (acc < maxAcc) out.push({ topic: t, acc: acc, total: s.total }); } });
+    out.sort((a, b) => a.acc - b.acc);
+    return out;
+  }
+  function buildReviewSet() {
+    const st = computeTopicStats();
+    let topics = weakTopics(3, 0.85).map((w) => w.topic);
+    if (!topics.length) topics = TOPIC_ORDER.filter((t) => st[t] && st[t].total > 0);
+    if (!topics.length) topics = ["arithmetic"];
+    topics = topics.slice(0, 4);
+    const N = 10, qs = [], seen = {}, types = ["numeric", "numeric", "concept", "truefalse"];
+    let guard = 0;
+    while (qs.length < N && guard < 250) {
+      guard++;
+      const t = topics[qs.length % topics.length];
+      const s = sampleProblem(t, 2, pick(types));
+      if (s && !seen[s.text]) { seen[s.text] = 1; qs.push({ text: s.text, options: s.options, correct: s.correct, explain: s.explain }); }
+    }
+    const set = { id: uid(), name: "Review: " + topics.slice(0, 3).map((t) => TOPIC_LABEL[t]).join(", "), questions: qs };
+    const sets = loadSets(); sets.push(set); saveSets(sets);
+    return set;
+  }
+  function updateRecVisibility() {
+    const tog = $("recToggle"); if (!tog) return;
+    if (isStudent()) tog.classList.remove("hidden");
+    else { tog.classList.add("hidden"); const p = $("recPanel"); if (p) p.classList.add("hidden"); }
+  }
+  function renderRecommendations() {
+    const st = computeTopicStats();
+    const tested = TOPIC_ORDER.filter((t) => st[t] && st[t].total > 0);
+    let html = '<div class="ed-head"><h4>Your recommendations</h4></div>';
+    if (!tested.length) { html += '<p class="ed-hint">Play a few quizzes and MathHoot will suggest topics to review and build practice sets tailored to your results.</p>'; $("recPanel").innerHTML = html; return; }
+    const weak = weakTopics(3, 0.8);
+    html += '<div class="sh-label">Topics to review</div>';
+    if (!weak.length) html += '<p class="ed-hint">Nice work — you\'re scoring well across every topic you\'ve practiced. Try a harder difficulty to stretch further.</p>';
+    else html += weak.map((w) => { const pct = Math.round(w.acc * 100); const cls = pct >= 60 ? "ok" : "bad"; return '<div class="rc-row"><div class="rc-label">' + escHtml(TOPIC_LABEL[w.topic]) + '</div><div class="rc-bar"><div class="rc-fill ' + cls + '" style="width:' + pct + '%"></div></div><div class="rc-pct"><b>' + pct + "%</b> (" + w.total + ")</div></div>"; }).join("");
+    html += '<div class="sh-label" style="margin-top:14px">Recommended practice</div>';
+    html += '<p class="ed-hint">' + (weak.length ? "Build a set focused on your weaker topics (" + weak.slice(0, 3).map((w) => TOPIC_LABEL[w.topic]).join(", ") + ")." : "Build a mixed review set from the topics you've practiced.") + "</p>";
+    html += '<button class="ed-btn primary" data-rec="build" type="button">Build me a review set</button>';
+    if (_lastRecSet) html += '<div class="ed-flash">Created “' + escHtml(_lastRecSet.name) + '” (' + _lastRecSet.questions.length + ' questions) — saved to your question sets.</div><button class="ed-btn" data-rec="play" data-id="' + _lastRecSet.id + '" type="button">▶ Play it now</button>';
+    $("recPanel").innerHTML = html;
   }
 
   // ---------- Live (hosted) games — real-time via Firestore ----------
@@ -2493,6 +2561,17 @@
       btn.disabled = true; err.textContent = "Working…";
       (act === "signup" ? signUp : logIn)(email, pw).then(() => { err.textContent = ""; }).catch((ex) => { err.textContent = authErrMsg(ex); btn.disabled = false; });
     } else if (act === "logout") { logOut(); }
+  });
+  // Recommendations (student accounts)
+  $("recToggle").addEventListener("click", () => {
+    const p = $("recPanel"); const hidden = p.classList.toggle("hidden");
+    if (!hidden) { _lastRecSet = null; renderRecommendations(); }
+    $("recToggle").textContent = hidden ? "🎯 Recommendations" : "🎯 Hide recommendations";
+  });
+  $("recPanel").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-rec]"); if (!b) return;
+    if (b.dataset.rec === "build") { _lastRecSet = buildReviewSet(); renderRecommendations(); }
+    else if (b.dataset.rec === "play") { const s = loadSets().find((x) => x.id === b.dataset.id); if (s && s.questions.length) startCustomGame(s); }
   });
   // Live game entry + in-game controls
   $("liveEntry").addEventListener("click", (e) => {
