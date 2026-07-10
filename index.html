@@ -39,6 +39,13 @@
     text-shadow: 0 4px 0 rgba(0,0,0,.18);
   }
   .brand .tag { opacity: .85; font-size: 15px; margin-top: 4px; }
+  .brand .ai-badge {
+    display: inline-block; margin-top: 10px;
+    background: linear-gradient(90deg, #7b3ff2, #b14bff);
+    color: #fff; font-weight: 800; font-size: 13px; letter-spacing: .3px;
+    padding: 6px 14px; border-radius: 999px;
+    box-shadow: 0 2px 10px rgba(123,63,242,.45);
+  }
 
   .card {
     background: #fff;
@@ -412,6 +419,7 @@
   <div class="brand">
     <h1>MathHoot</h1>
     <div class="tag">A Kahoot-style quiz, built for math.</div>
+    <div class="ai-badge">✨ Now with AI Integration</div>
   </div>
 
   <!-- ============ SETUP ============ -->
@@ -508,6 +516,9 @@
 
     <button id="recToggle" class="catalog-toggle hidden" type="button">🎯 Recommendations</button>
     <div id="recPanel" class="catalog hidden"></div>
+
+    <button id="aiToggle" class="catalog-toggle" type="button">✨ AI Integration — generate a set</button>
+    <div id="aiPanel" class="catalog hidden"></div>
 
     <div id="liveEntry"></div>
   </div>
@@ -2100,6 +2111,88 @@
     $("recPanel").innerHTML = html;
   }
 
+  // ---------- AI Integration: generate custom sets with the Claude API ----------
+  // MathHoot is a static site, so there is no server to hold a secret key. The
+  // user supplies their OWN Anthropic API key; it is stored only in this browser
+  // (local storage, never synced to the cloud) and sent only to Anthropic's API
+  // via the official browser-direct-access header.
+  const AI_MODEL = "claude-opus-4-8";
+  const AIKEY = "mathhoot.aikey.v1";
+  let _aiBusy = false, _lastAISet = null, _aiPrompt = "", _aiCount = 8;
+  function loadAIKey() { return loadLocal(AIKEY, "") || ""; }
+  function saveAIKey(k) { saveLocal(AIKEY, k || ""); }
+  function renderAIPanel() {
+    const key = loadAIKey();
+    let html = '<div class="ed-head"><h4>✨ AI Integration</h4></div>';
+    html += '<p class="ed-hint">Describe a quiz in plain English and Claude (Anthropic’s AI) writes a full question set — questions, four answer choices, the correct answer, and an explanation for each. It’s saved to your question sets, ready to play solo or host live.</p>';
+    if (!key) {
+      html += '<div class="sh-label">Anthropic API key</div>';
+      html += '<p class="ed-hint">MathHoot runs entirely in your browser, so AI generation uses <b>your own</b> Anthropic API key. It’s stored only on this device and sent only to Anthropic’s API — never to MathHoot. Create a key at console.anthropic.com.</p>';
+      html += '<input id="aiKey" class="ed-input" type="password" autocomplete="off" placeholder="sk-ant-...">';
+      html += '<button class="ed-btn primary" data-ai="savekey" type="button">Save key</button>';
+      html += '<div id="aiErr" class="ed-err"></div>';
+      $("aiPanel").innerHTML = html; return;
+    }
+    html += '<div class="sh-label">What should the quiz cover?</div>';
+    html += '<textarea id="aiPrompt" class="ed-input" rows="3" placeholder="e.g. 8 medium word problems about ratios and proportions for 7th grade">' + escHtml(_aiPrompt) + '</textarea>';
+    html += '<div class="sh-label">How many questions?</div>';
+    html += '<input id="aiCount" class="ed-input" type="number" min="3" max="15" value="' + _aiCount + '">';
+    html += '<button class="ed-btn primary" data-ai="gen" type="button"' + (_aiBusy ? ' disabled' : '') + '>' + (_aiBusy ? 'Generating…' : '✨ Generate with AI') + '</button> ';
+    html += '<button class="ed-btn sm" data-ai="clearkey" type="button">Change key</button>';
+    html += '<div id="aiErr" class="ed-err"></div>';
+    if (_lastAISet) html += '<div class="ed-flash">✨ AI created “' + escHtml(_lastAISet.name) + '” (' + _lastAISet.questions.length + ' questions) — saved to your question sets.</div><button class="ed-btn" data-ai="play" data-id="' + _lastAISet.id + '" type="button">▶ Play it now</button>';
+    $("aiPanel").innerHTML = html;
+  }
+  function aiSchema() {
+    return { type: "object", additionalProperties: false, required: ["questions"], properties: {
+      questions: { type: "array", items: { type: "object", additionalProperties: false,
+        required: ["text", "options", "correct", "explain"], properties: {
+          text: { type: "string" },
+          options: { type: "array", items: { type: "string" } },
+          correct: { type: "integer" },
+          explain: { type: "string" } } } } } };
+  }
+  function generateAISet(prompt, count) {
+    const key = loadAIKey();
+    const sys = "You are a math quiz author for a Kahoot-style game called MathHoot. Write exactly " + count +
+      " multiple-choice math questions matching the user's request. Rules: each question has EXACTLY 4 answer options; exactly one is correct; 'correct' is the 0-based index of the correct option among 'options'; the wrong options must be plausible but clearly incorrect and all four must be distinct; keep each question under ~140 characters; use plain-text math only (^ for powers, / for division, sqrt(), no LaTeX or $); make 'explain' one short sentence justifying the answer. Vary the questions and make sure every stated correct answer is actually correct.";
+    const body = { model: AI_MODEL, max_tokens: 4096, system: sys,
+      messages: [{ role: "user", content: prompt }],
+      output_config: { format: { type: "json_schema", schema: aiSchema() } } };
+    return fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": key,
+        "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+      body: JSON.stringify(body)
+    }).then((resp) => {
+      if (!resp.ok) {
+        return resp.json().catch(() => null).then((e) => {
+          let msg = (e && e.error && e.error.message) || ("Request failed (HTTP " + resp.status + ").");
+          if (resp.status === 401) msg = "That API key was rejected. Check it and try “Change key”.";
+          else if (resp.status === 429) msg = "Rate limited by Anthropic — wait a moment and try again.";
+          throw new Error(msg);
+        });
+      }
+      return resp.json();
+    }).then((data) => {
+      if (data.stop_reason === "refusal") throw new Error("The AI declined this request. Try rephrasing it.");
+      const tb = (data.content || []).find((b) => b.type === "text");
+      if (!tb) throw new Error("The AI returned no content. Try again.");
+      let parsed; try { parsed = JSON.parse(tb.text); } catch (e) { throw new Error("Couldn't read the AI's response. Try again."); }
+      const qs = [];
+      (parsed.questions || []).forEach((q) => {
+        const opts = (q.options || []).map((o) => String(o)).slice(0, 4);
+        const c = Math.round(+q.correct);
+        if (opts.length === 4 && c >= 0 && c <= 3) qs.push({ text: String(q.text || "").slice(0, 240), options: opts, correct: c, explain: String(q.explain || "").slice(0, 300) });
+      });
+      if (!qs.length) throw new Error("The AI didn't return usable questions. Try rephrasing.");
+      const name = "AI: " + prompt.slice(0, 40) + (prompt.length > 40 ? "…" : "");
+      const set = { id: uid(), name: name, questions: qs };
+      const sets = loadSets(); sets.push(set); saveSets(sets);
+      return set;
+    });
+  }
+
   // ---------- Live (hosted) games — real-time via Firestore ----------
   let _hostSetId = "";
   function gameRef(code) { return fbDb.collection("games").doc(code); }
@@ -2583,6 +2676,33 @@
     const b = e.target.closest("[data-rec]"); if (!b) return;
     if (b.dataset.rec === "build") { _lastRecSet = buildReviewSet(); renderRecommendations(); }
     else if (b.dataset.rec === "play") { const s = loadSets().find((x) => x.id === b.dataset.id); if (s && s.questions.length) startCustomGame(s); }
+  });
+  // AI Integration panel
+  $("aiToggle").addEventListener("click", () => {
+    const p = $("aiPanel"); const hidden = p.classList.toggle("hidden");
+    if (!hidden) { _lastAISet = null; renderAIPanel(); }
+    $("aiToggle").textContent = hidden ? "✨ AI Integration — generate a set" : "✨ AI Integration — hide";
+  });
+  $("aiPanel").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-ai]"); if (!b) return;
+    const act = b.dataset.ai;
+    if (act === "savekey") {
+      const v = ($("aiKey").value || "").trim();
+      if (!v) { $("aiErr").textContent = "Paste your Anthropic API key first."; return; }
+      saveAIKey(v); renderAIPanel();
+    } else if (act === "clearkey") { saveAIKey(""); _lastAISet = null; renderAIPanel(); }
+    else if (act === "play") { const s = loadSets().find((x) => x.id === b.dataset.id); if (s && s.questions.length) startCustomGame(s); }
+    else if (act === "gen") {
+      if (_aiBusy) return;
+      _aiPrompt = ($("aiPrompt").value || "").trim();
+      _aiCount = Math.max(3, Math.min(15, Math.round(+$("aiCount").value || 8)));
+      if (!_aiPrompt) { $("aiErr").textContent = "Describe what the quiz should cover."; return; }
+      _aiBusy = true; _lastAISet = null; renderAIPanel();
+      $("aiErr").textContent = "Contacting Claude… this can take a few seconds.";
+      generateAISet(_aiPrompt, _aiCount)
+        .then((set) => { _aiBusy = false; _lastAISet = set; _aiPrompt = ""; renderAIPanel(); })
+        .catch((err) => { _aiBusy = false; renderAIPanel(); const el = $("aiErr"); if (el) el.textContent = String((err && err.message) || err); });
+    }
   });
   // Live game entry + in-game controls
   $("liveEntry").addEventListener("click", (e) => {
