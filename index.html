@@ -377,6 +377,27 @@
   .hist-acc.good { color: var(--green); } .hist-acc.ok { color: var(--yellow); } .hist-acc.bad { color: var(--red); }
   .hist-sc { font-size: 13px; color: #666; }
 
+  /* ---------- Roles & live games ---------- */
+  .role-pick { display: flex; align-items: center; gap: 8px; margin: 6px 0 8px; font-size: 13px; color: #666; }
+  .role-opt.sel { background: var(--purple); border-color: var(--purple); color: #fff; }
+  .live-entry { background: #f5f0ff; border-color: var(--purple); color: var(--purple); }
+  #live { text-align: center; }
+  #live .acct-actions { justify-content: center; }
+  .live-head h2 { font-size: clamp(22px, 5vw, 30px); margin-bottom: 12px; }
+  .live-code { font-size: 14px; color: #888; margin: 8px 0 14px; }
+  .live-code b { display: block; font-size: clamp(30px, 9vw, 52px); font-weight: 800; letter-spacing: 4px; color: var(--purple); margin-top: 4px; }
+  .live-code-input { text-align: center; font-size: 24px; font-weight: 800; letter-spacing: 4px; text-transform: uppercase; }
+  .live-q { font-size: clamp(22px, 5vw, 34px); font-weight: 800; color: var(--ink); margin: 8px 0 16px; word-break: break-word; }
+  .live-opts { margin-bottom: 14px; }
+  .live-opts .answer { cursor: default; }
+  .live-opts .answer[data-pick] { cursor: pointer; }
+  .lb { text-align: left; margin: 8px 0 14px; }
+  .lb-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 8px; background: #f7f7f9; margin-bottom: 5px; font-size: 15px; }
+  .lb-row.me { background: #f5f0ff; }
+  .lb-rank { width: 22px; font-weight: 800; color: #999; text-align: center; }
+  .lb-name { flex: 1; font-weight: 600; color: var(--ink); }
+  .lb-score { font-weight: 800; color: var(--purple); }
+
   .hidden { display: none !important; }
 </style>
 <!-- Firebase (cloud accounts). Loaded from CDN; if unreachable, the app runs in local-only mode. -->
@@ -482,6 +503,8 @@
 
     <button id="historyToggle" class="catalog-toggle" type="button">🏆 Game history</button>
     <div id="historyPanel" class="catalog hidden"></div>
+
+    <div id="liveEntry"></div>
   </div>
 
   <!-- ============ GAME ============ -->
@@ -517,6 +540,8 @@
       <div class="review" id="review"></div>
     </div>
   </div>
+
+  <div id="live" class="card hidden"><div id="liveBody"></div></div>
 </div>
 
 <script>
@@ -547,8 +572,10 @@
   };
   let fbAuth = null, fbDb = null, firebaseReady = false;
   let currentUser = null;   // signed-in Firebase user, or null
-  let cloudDoc = null;      // cached { sets, history, prefs } while signed in
+  let cloudDoc = null;      // cached { sets, history, prefs, role } while signed in
   let _cloudTimer = null;   // debounce handle for cloud writes
+  let _signupRole = "student", _pendingRole = null; // role chosen on the signup form
+  let live = null;          // active live (hosted/joined) game session
   try {
     if (typeof firebase !== "undefined" && FIREBASE_CONFIG.apiKey) {
       firebase.initializeApp(FIREBASE_CONFIG);
@@ -1847,7 +1874,7 @@
   // session; on a hosted https page it persists normally.
   let _lsOK = null;
   const _memStore = {};
-  const HISTORY_KEY = "mathhoot.history.v1", PREFS_KEY = "mathhoot.prefs.v1";
+  const HISTORY_KEY = "mathhoot.history.v1", PREFS_KEY = "mathhoot.prefs.v1", ROLE_KEY = "mathhoot.role.v1";
   function lsAvailable() {
     if (_lsOK === null) { try { localStorage.setItem(SETS_KEY + ".t", "1"); localStorage.removeItem(SETS_KEY + ".t"); _lsOK = true; } catch (e) { _lsOK = false; } }
     return _lsOK;
@@ -1901,8 +1928,9 @@
   }
   function normalizeDoc(d) {
     d = d || {};
-    return { sets: Array.isArray(d.sets) ? d.sets : [], history: Array.isArray(d.history) ? d.history : [], prefs: d.prefs || null };
+    return { sets: Array.isArray(d.sets) ? d.sets : [], history: Array.isArray(d.history) ? d.history : [], prefs: d.prefs || null, role: d.role || null };
   }
+  function isTeacher() { return loggedIn() && cloudDoc.role === "teacher"; }
   function mergeHistory(a, b) {
     const seen = {}, out = [];
     (a || []).concat(b || []).forEach((e) => { if (!e) return; const k = e.t + "|" + (e.label || ""); if (!seen[k]) { seen[k] = 1; out.push(e); } });
@@ -1921,25 +1949,29 @@
     saveLocal(SETS_KEY, cloudDoc.sets);
     saveLocal(HISTORY_KEY, cloudDoc.history);
     saveLocal(PREFS_KEY, cloudDoc.prefs);
+    saveLocal(ROLE_KEY, cloudDoc.role);
   }
   function onSignedIn(user) {
     currentUser = user;
-    const local = { sets: loadLocal(SETS_KEY, []), history: loadLocal(HISTORY_KEY, []), prefs: loadLocal(PREFS_KEY, null) };
+    const local = { sets: loadLocal(SETS_KEY, []), history: loadLocal(HISTORY_KEY, []), prefs: loadLocal(PREFS_KEY, null), role: loadLocal(ROLE_KEY, null) };
     fbDb.collection("users").doc(user.uid).get().then((snap) => {
-      const cloud = snap.exists ? normalizeDoc(snap.data()) : { sets: [], history: [], prefs: null };
+      const cloud = snap.exists ? normalizeDoc(snap.data()) : { sets: [], history: [], prefs: null, role: null };
       // Merge cloud + local so nothing is lost in either direction.
       cloudDoc = {
         sets: mergeSets(cloud.sets, local.sets),
         history: mergeHistory(cloud.history, local.history),
         prefs: cloud.prefs || local.prefs || snapshotPrefs(),
+        role: cloud.role || _pendingRole || local.role || "student",
       };
+      _pendingRole = null;
       mirrorToLocal();
       applyPrefs(cloudDoc.prefs);
       scheduleCloudWrite();
       afterAuthChange();
     }).catch(() => {
       // Cloud unavailable — keep working from local so nothing is lost.
-      cloudDoc = { sets: local.sets, history: local.history, prefs: local.prefs || snapshotPrefs() };
+      cloudDoc = { sets: local.sets, history: local.history, prefs: local.prefs || snapshotPrefs(), role: _pendingRole || local.role || "student" };
+      _pendingRole = null;
       afterAuthChange();
     });
   }
@@ -1968,20 +2000,211 @@
   }
   function renderAccount() {
     const tog = $("acctToggle"), panel = $("acctPanel");
-    if (!firebaseReady) { tog.classList.add("hidden"); panel.classList.add("hidden"); return; }
+    if (!firebaseReady) { tog.classList.add("hidden"); panel.classList.add("hidden"); renderLiveEntry(); return; }
     if (currentUser) {
       tog.textContent = "👤 " + (currentUser.email || "Signed in");
-      panel.innerHTML = '<div class="acct-info"><b>Signed in</b><span>' + escHtml(currentUser.email || "") + "</span></div>" +
-        '<p class="ed-hint">Your question sets, game history, and preferences are synced to this account — sign in on another device to see them there.</p>' +
+      panel.innerHTML = '<div class="acct-info"><b>Signed in · ' + (isTeacher() ? "Teacher" : "Student") + '</b><span>' + escHtml(currentUser.email || "") + "</span></div>" +
+        '<p class="ed-hint">Your question sets, game history, and preferences sync to this account across devices.</p>' +
         '<button class="ed-btn danger" data-act="logout">Log out</button>';
     } else {
       tog.textContent = "👤 Sign in / create account";
-      panel.innerHTML = '<p class="ed-hint">Sign in to sync your question sets, game history, and preferences across devices.</p>' +
+      panel.innerHTML = '<p class="ed-hint">Sign in to sync your content across devices, or create an account.</p>' +
         '<input id="acEmail" class="ed-input" type="email" placeholder="Email" autocomplete="username">' +
         '<input id="acPw" class="ed-input" type="password" placeholder="Password (6+ characters)" autocomplete="current-password">' +
+        '<div class="role-pick"><span>New account:</span>' +
+          '<button class="ed-btn role-opt' + (_signupRole === "student" ? " sel" : "") + '" data-role="student">Student</button>' +
+          '<button class="ed-btn role-opt' + (_signupRole === "teacher" ? " sel" : "") + '" data-role="teacher">Teacher</button>' +
+        "</div>" +
         '<div class="acct-actions"><button class="ed-btn primary" data-act="login">Log in</button><button class="ed-btn" data-act="signup">Sign up</button></div>' +
         '<div id="acErr" class="ed-err"></div>';
     }
+    renderLiveEntry();
+  }
+  function renderLiveEntry() {
+    const el = $("liveEntry"); if (!el) return;
+    if (!loggedIn()) { el.innerHTML = ""; return; }
+    el.innerHTML = isTeacher()
+      ? '<button class="catalog-toggle live-entry" data-live="host" type="button">🎓 Host a live game</button>'
+      : '<button class="catalog-toggle live-entry" data-live="join" type="button">🙋 Join a live game</button>';
+  }
+
+  // ---------- Live (hosted) games — real-time via Firestore ----------
+  let _hostSetId = "";
+  function gameRef(code) { return fbDb.collection("games").doc(code); }
+  function playersRef(code) { return fbDb.collection("games").doc(code).collection("players"); }
+  function newCode() { let s = ""; const A = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; for (let i = 0; i < 5; i++) s += A[Math.floor(Math.random() * A.length)]; return s; }
+  function svr() { return firebase.firestore.FieldValue.serverTimestamp(); }
+  function inc(n) { return firebase.firestore.FieldValue.increment(n); }
+  function showLive() { setupEl.classList.add("hidden"); gameEl.classList.add("hidden"); resultsEl.classList.add("hidden"); $("live").classList.remove("hidden"); }
+  function hideLive() { $("live").classList.add("hidden"); setupEl.classList.remove("hidden"); }
+  function liveUnsub() { if (live && live.unsub) live.unsub.forEach((u) => { try { u(); } catch (e) {} }); }
+  function leaveLive() {
+    liveUnsub();
+    if (live) {
+      try {
+        if (live.role === "player" && live.code) playersRef(live.code).doc(currentUser.uid).delete().catch(() => {});
+        else if (live.role === "host" && live.code && live.data && live.data.status !== "ended") gameRef(live.code).update({ status: "ended" }).catch(() => {});
+      } catch (e) {}
+    }
+    live = null; hideLive();
+  }
+  function resolveLiveQuestions() {
+    if (_hostSetId) {
+      const set = loadSets().find((s) => s.id === _hostSetId);
+      if (set && set.questions.length) return { title: set.name, questions: set.questions.map((q) => ({ text: q.text, options: q.options.slice(), correct: q.correct })) };
+    }
+    const L = LVL[cfg.diff] || 2, out = [];
+    resetGenState();
+    for (let i = 0; i < cfg.count; i++) {
+      const q = generateOne(cfg.diff === "adaptive" ? 2 : L), opts = q.options.map(String);
+      out.push({ text: q.text, options: opts, correct: Math.max(0, opts.indexOf(String(q.answer))) });
+    }
+    const ts = cfg.topics.map((t) => TOPIC_LABEL[t] || t);
+    return { title: (ts.slice(0, 2).join(", ") || "Quiz") + (ts.length > 2 ? " +" + (ts.length - 2) : ""), questions: out };
+  }
+  function openHost() { if (!isTeacher()) return; live = { role: "host", err: "" }; showLive(); renderLive(); }
+  function openJoin() { live = { role: "player", err: "" }; showLive(); renderLive(); }
+  function hostCreate() {
+    const rq = resolveLiveQuestions();
+    if (!rq.questions.length) { live.err = "Nothing to host — pick a set or set up a quiz."; renderLive(); return; }
+    const code = newCode();
+    live.err = "";
+    gameRef(code).set({ host: currentUser.uid, hostName: (cfg.name || currentUser.email || "Teacher"), status: "lobby", qIndex: -1, timeLimit: 20, title: rq.title, questions: rq.questions, createdAt: svr() })
+      .then(() => enterLive(code, "host"))
+      .catch((e) => { live.err = "Couldn't create the game (" + (e.code || "error") + "). Is Firestore set up?"; renderLive(); });
+  }
+  function hostAction(act) {
+    if (!live || live.role !== "host" || !live.data) return;
+    const g = live.data, n = g.questions.length;
+    if (act === "start") gameRef(live.code).update({ status: "question", qIndex: 0, qStartAt: svr() }).catch(() => {});
+    else if (act === "reveal") gameRef(live.code).update({ status: "reveal" }).catch(() => {});
+    else if (act === "next") gameRef(live.code).update(g.qIndex + 1 < n ? { status: "question", qIndex: g.qIndex + 1, qStartAt: svr() } : { status: "ended" }).catch(() => {});
+  }
+  function joinByCode(code, name) {
+    code = (code || "").trim().toUpperCase();
+    if (!code) { live.err = "Enter the game code."; renderLive(); return; }
+    gameRef(code).get().then((snap) => {
+      if (!snap.exists) { live.err = "No game found with code " + code + "."; renderLive(); return; }
+      if (snap.data().status === "ended") { live.err = "That game has already ended."; renderLive(); return; }
+      playersRef(code).doc(currentUser.uid).set({ name: (name || cfg.name || "Student").slice(0, 24), score: 0, joinedAt: svr(), lastAnsweredIndex: -1 }, { merge: true })
+        .then(() => enterLive(code, "player"))
+        .catch((e) => { live.err = "Couldn't join (" + (e.code || "error") + ")."; renderLive(); });
+    }).catch((e) => { live.err = "Couldn't reach that game (" + (e.code || "error") + ")."; renderLive(); });
+  }
+  function playerAnswer(i) {
+    if (!live || live.role !== "player" || live.mySelected != null) return;
+    const g = live.data; if (!g || g.status !== "question") return;
+    const q = g.questions[g.qIndex]; if (!q) return;
+    live.mySelected = i;
+    const correct = i === q.correct;
+    const frac = Math.max(0, 1 - (Date.now() - (live.qShownAt || Date.now())) / ((g.timeLimit || 20) * 1000));
+    const upd = { lastAnsweredIndex: g.qIndex, lastCorrect: correct };
+    if (correct) upd.score = inc(Math.round(500 + 500 * frac));
+    playersRef(live.code).doc(currentUser.uid).update(upd).catch(() => {});
+    renderLive();
+  }
+  function enterLive(code, role) {
+    liveUnsub();
+    live = { code: code, role: role, data: null, players: [], unsub: [], mySelected: null, qShownAt: 0, lastQ: -2, err: "" };
+    showLive();
+    live.unsub.push(gameRef(code).onSnapshot((snap) => {
+      if (!snap.exists) { if (live) { live.data = null; live.err = "The game was closed by the host."; renderLive(); } return; }
+      live.data = snap.data(); renderLive();
+    }, () => {}));
+    live.unsub.push(playersRef(code).onSnapshot((qs) => {
+      const arr = []; qs.forEach((d) => arr.push(Object.assign({ uid: d.id }, d.data())));
+      arr.sort((a, b) => (b.score || 0) - (a.score || 0));
+      if (live) { live.players = arr; renderLive(); }
+    }, () => {}));
+  }
+  // ----- Live rendering -----
+  function liveHead(t) { return '<div class="live-head"><h2>' + escHtml(t) + "</h2></div>"; }
+  function liveLeave(label) { return '<button class="ed-btn danger" data-live="leave" type="button">' + escHtml(label || "Leave") + "</button>"; }
+  function optTiles(q, opts) {
+    return '<div class="answers live-opts">' + q.options.map((o, i) => {
+      const cls = "answer a" + i + (opts && opts.correctIdx != null && i === opts.correctIdx ? " correct" : "") + (opts && opts.dimExcept != null && i !== opts.dimExcept && (opts.correctIdx == null || i !== opts.correctIdx) ? " dim" : "");
+      const tag = opts && opts.pick ? "button" : "div", attr = opts && opts.pick ? ' data-pick="' + i + '" type="button"' : "";
+      return "<" + tag + ' class="' + cls + '"' + attr + '><span class="shape">' + SHAPES[i] + "</span><span>" + escHtml(o) + "</span></" + tag + ">";
+    }).join("") + "</div>";
+  }
+  function leaderboardHtml(players, meUid) {
+    if (!players || !players.length) return '<p class="ed-hint">No players yet.</p>';
+    return '<div class="lb">' + players.slice(0, 15).map((p, i) => '<div class="lb-row' + (p.uid === meUid ? " me" : "") + '"><span class="lb-rank">' + (i + 1) + '</span><span class="lb-name">' + escHtml(p.name || "?") + '</span><span class="lb-score">' + (p.score || 0) + "</span></div>").join("") + "</div>";
+  }
+  function renderLive() {
+    if (!live) return;
+    const body = $("liveBody");
+    if (live.role === "host" && !live.code) {
+      const sets = loadSets().filter((s) => s.questions.length);
+      body.innerHTML = liveHead("Host a live game") +
+        '<p class="ed-hint">Students join with a code you\'ll get next. Choose what to host:</p>' +
+        '<div class="sh-label">Content</div><select id="hostSource" class="ed-select"><option value="">Generated quiz (from your setup options)</option>' +
+        sets.map((s) => '<option value="' + s.id + '">Set: ' + escHtml(s.name) + " (" + s.questions.length + ")</option>").join("") + "</select>" +
+        '<div class="acct-actions"><button class="ed-btn primary" data-live="create" type="button">Create game</button>' + liveLeave("Cancel") + "</div>" +
+        (live.err ? '<div class="ed-err">' + escHtml(live.err) + "</div>" : "");
+      return;
+    }
+    if (live.role === "player" && !live.code) {
+      body.innerHTML = liveHead("Join a live game") +
+        '<p class="ed-hint">Enter the code your teacher shows on screen.</p>' +
+        '<input id="joinCode" class="ed-input live-code-input" type="text" placeholder="GAME CODE" maxlength="6">' +
+        '<input id="joinName" class="ed-input" type="text" placeholder="Your name" value="' + escHtml(cfg.name || "") + '" maxlength="24">' +
+        '<div class="acct-actions"><button class="ed-btn primary" data-live="dojoin" type="button">Join</button>' + liveLeave("Cancel") + "</div>" +
+        (live.err ? '<div class="ed-err">' + escHtml(live.err) + "</div>" : "");
+      return;
+    }
+    const g = live.data;
+    if (!g) { body.innerHTML = liveHead("Live game") + '<p class="ed-hint">' + escHtml(live.err || "Connecting…") + "</p>" + liveLeave(); return; }
+    if (live.role === "player" && g.status === "question" && g.qIndex !== live.lastQ) { live.lastQ = g.qIndex; live.mySelected = null; live.qShownAt = Date.now(); }
+    const q = g.questions[g.qIndex];
+    if (g.status === "lobby") {
+      if (live.role === "host") body.innerHTML = liveHead("Lobby") +
+        '<div class="live-code">Game code<b>' + escHtml(live.code) + "</b></div>" +
+        '<p class="ed-hint">"' + escHtml(g.title || "Quiz") + '" · ' + g.questions.length + " questions · " + live.players.length + " joined</p>" +
+        leaderboardHtml(live.players) +
+        '<div class="acct-actions"><button class="ed-btn primary" data-live="start" type="button"' + (live.players.length ? "" : " disabled") + ">Start game</button>" + liveLeave("End") + "</div>";
+      else body.innerHTML = liveHead("You're in!") +
+        '<div class="live-code">Code<b>' + escHtml(live.code) + "</b></div>" +
+        '<p class="ed-hint">Waiting for the teacher to start "' + escHtml(g.title || "the quiz") + '"…</p>' + liveLeave("Leave");
+      return;
+    }
+    if (g.status === "question") {
+      if (live.role === "host") {
+        const answered = live.players.filter((p) => p.lastAnsweredIndex === g.qIndex).length;
+        body.innerHTML = liveHead("Question " + (g.qIndex + 1) + " / " + g.questions.length) +
+          '<div class="live-q">' + escHtml(q.text) + "</div>" + optTiles(q, {}) +
+          '<p class="ed-hint">' + answered + " of " + live.players.length + " answered</p>" +
+          '<div class="acct-actions"><button class="ed-btn primary" data-live="reveal" type="button">Reveal answer</button>' + liveLeave("End") + "</div>";
+      } else {
+        body.innerHTML = liveHead("Question " + (g.qIndex + 1) + " / " + g.questions.length) +
+          '<div class="live-q">' + escHtml(q.text) + "</div>" +
+          (live.mySelected == null ? optTiles(q, { pick: true }) : optTiles(q, { dimExcept: live.mySelected }) + '<p class="ed-hint">Answer locked — waiting for the teacher…</p>');
+      }
+      return;
+    }
+    if (g.status === "reveal") {
+      if (live.role === "host") {
+        const last = g.qIndex + 1 >= g.questions.length;
+        body.innerHTML = liveHead("Answer") +
+          '<div class="live-q">' + escHtml(q.text) + "</div>" + optTiles(q, { correctIdx: q.correct }) +
+          '<div class="sh-label">Leaderboard</div>' + leaderboardHtml(live.players) +
+          '<div class="acct-actions"><button class="ed-btn primary" data-live="next" type="button">' + (last ? "Final results" : "Next question") + "</button>" + liveLeave("End") + "</div>";
+      } else {
+        const me = live.players.find((p) => p.uid === currentUser.uid) || {};
+        const rank = live.players.findIndex((p) => p.uid === currentUser.uid) + 1;
+        const gotIt = live.mySelected != null && live.mySelected === q.correct;
+        body.innerHTML = liveHead(live.mySelected == null ? "No answer" : (gotIt ? "Correct! ✓" : "Not quite ✗")) +
+          '<div class="live-q">' + escHtml(q.text) + "</div>" + optTiles(q, { correctIdx: q.correct }) +
+          '<p class="ed-hint">Score <b>' + (me.score || 0) + "</b>" + (rank ? " · Rank " + rank + " of " + live.players.length : "") + "</p>";
+      }
+      return;
+    }
+    // ended
+    const me = live.players.find((p) => p.uid === currentUser.uid) || {};
+    const rank = live.players.findIndex((p) => p.uid === currentUser.uid) + 1;
+    body.innerHTML = liveHead("Final results — " + (g.title || "Quiz")) + leaderboardHtml(live.players, currentUser.uid) +
+      (live.role === "player" ? '<p class="ed-hint">You finished ' + (rank ? "#" + rank + " of " + live.players.length : "") + " with " + (me.score || 0) + " points.</p>" : "") +
+      '<div class="acct-actions">' + liveLeave(live.role === "host" ? "Close" : "Leave") + "</div>";
   }
   function renderHistory() {
     const h = loadHistory();
@@ -2258,15 +2481,34 @@
   // Account panel
   $("acctToggle").addEventListener("click", () => { const p = $("acctPanel"); const hidden = p.classList.toggle("hidden"); if (!hidden) renderAccount(); });
   $("acctPanel").addEventListener("click", (e) => {
+    const roleBtn = e.target.closest("[data-role]");
+    if (roleBtn) { _signupRole = roleBtn.dataset.role; renderAccount(); return; }
     const btn = e.target.closest("[data-act]"); if (!btn) return;
     const act = btn.dataset.act;
     if (act === "login" || act === "signup") {
       const email = $("acEmail").value.trim(), pw = $("acPw").value;
       const err = $("acErr");
       if (!email || !pw) { err.textContent = "Enter your email and a password."; return; }
+      if (act === "signup") _pendingRole = _signupRole;
       btn.disabled = true; err.textContent = "Working…";
       (act === "signup" ? signUp : logIn)(email, pw).then(() => { err.textContent = ""; }).catch((ex) => { err.textContent = authErrMsg(ex); btn.disabled = false; });
     } else if (act === "logout") { logOut(); }
+  });
+  // Live game entry + in-game controls
+  $("liveEntry").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-live]"); if (!b) return;
+    if (b.dataset.live === "host") openHost();
+    else if (b.dataset.live === "join") openJoin();
+  });
+  $("liveBody").addEventListener("click", (e) => {
+    const pick = e.target.closest("[data-pick]");
+    if (pick) { playerAnswer(+pick.dataset.pick); return; }
+    const b = e.target.closest("[data-live]"); if (!b) return;
+    const a = b.dataset.live;
+    if (a === "leave") leaveLive();
+    else if (a === "create") { _hostSetId = ($("hostSource") ? $("hostSource").value : "") || ""; hostCreate(); }
+    else if (a === "start" || a === "reveal" || a === "next") hostAction(a);
+    else if (a === "dojoin") joinByCode($("joinCode") ? $("joinCode").value : "", $("joinName") ? $("joinName").value : "");
   });
   // History panel
   $("historyToggle").addEventListener("click", () => {
