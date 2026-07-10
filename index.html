@@ -363,6 +363,8 @@
   .opt-row input[type=text] { flex: 1; font-size: 14px; padding: 7px 10px; border: 2px solid #ddd; border-radius: 8px; }
   .opt-row input[type=text]:focus { border-color: var(--purple); outline: none; }
   .ed-err { color: var(--red); font-size: 13px; font-weight: 600; margin-top: 6px; min-height: 16px; }
+  .ed-err.ed-ok { color: var(--green); }
+  .ed-link { background: none; border: none; color: var(--blue); font-size: 13px; font-weight: 600; cursor: pointer; padding: 4px 0; text-decoration: underline; }
   .ed-hint { font-size: 12px; color: #888; margin: 4px 0 8px; }
   .pick-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; align-items: center; }
   .ed-select { font-size: 13px; padding: 7px 8px; border: 2px solid #ddd; border-radius: 8px; background: #fff; font-family: inherit; }
@@ -1995,6 +1997,7 @@
   function signUp(email, pw) { return fbAuth.createUserWithEmailAndPassword(email, pw); }
   function logIn(email, pw) { return fbAuth.signInWithEmailAndPassword(email, pw); }
   function logOut() { return fbAuth.signOut(); }
+  function resetPassword(email) { return fbAuth.sendPasswordResetEmail(email); }
   function authErrMsg(e) {
     const c = (e && e.code) || "";
     if (c.indexOf("email-already-in-use") >= 0) return "That email already has an account — try logging in instead.";
@@ -2023,6 +2026,7 @@
           '<button class="ed-btn role-opt' + (_signupRole === "teacher" ? " sel" : "") + '" data-role="teacher">Teacher</button>' +
         "</div>" +
         '<div class="acct-actions"><button class="ed-btn primary" data-act="login">Log in</button><button class="ed-btn" data-act="signup">Sign up</button></div>' +
+        '<button class="ed-link" data-act="reset" type="button">Forgot password?</button>' +
         '<div id="acErr" class="ed-err"></div>';
     }
     renderLiveEntry();
@@ -2555,11 +2559,18 @@
     const act = btn.dataset.act;
     if (act === "login" || act === "signup") {
       const email = $("acEmail").value.trim(), pw = $("acPw").value;
-      const err = $("acErr");
+      const err = $("acErr"); err.classList.remove("ed-ok");
       if (!email || !pw) { err.textContent = "Enter your email and a password."; return; }
       if (act === "signup") _pendingRole = _signupRole;
       btn.disabled = true; err.textContent = "Working…";
       (act === "signup" ? signUp : logIn)(email, pw).then(() => { err.textContent = ""; }).catch((ex) => { err.textContent = authErrMsg(ex); btn.disabled = false; });
+    } else if (act === "reset") {
+      const email = $("acEmail").value.trim();
+      const err = $("acErr"); err.classList.remove("ed-ok");
+      if (!email) { err.textContent = "Enter your email above first, then tap Forgot password?"; return; }
+      err.textContent = "Sending…";
+      resetPassword(email).then(() => { err.classList.add("ed-ok"); err.textContent = "Password reset email sent to " + email + " — check your inbox (and spam)."; })
+        .catch((ex) => { err.textContent = authErrMsg(ex); });
     } else if (act === "logout") { logOut(); }
   });
   // Recommendations (student accounts)
