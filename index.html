@@ -148,6 +148,21 @@
     border-radius: 999px;
     font-size: 15px;
   }
+  .pill-group { display: flex; gap: 10px; align-items: center; min-width: 0; }
+  .quit-btn {
+    flex: 0 0 auto;
+    background: rgba(255,255,255,.15);
+    color: #fff;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 999px;
+    font-size: 15px;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+  }
+  .quit-btn:hover { background: rgba(226,68,92,.92); }
+  .quit-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 
   .timer-track {
     height: 14px;
@@ -540,8 +555,11 @@
   <!-- ============ GAME ============ -->
   <div id="game" class="hidden">
     <div class="topbar">
-      <div class="pill" id="progress">Question 1 / 10</div>
-      <div class="pill" id="scoreLabel">Score: 0</div>
+      <div class="pill-group">
+        <div class="pill" id="progress">Question 1 / 10</div>
+        <div class="pill" id="scoreLabel">Score: 0</div>
+      </div>
+      <button id="quitBtn" class="quit-btn" type="button" aria-label="Quit this quiz">✕ Quit</button>
     </div>
     <div class="timer-track" id="timerTrack"><div class="timer-fill" id="timerFill"></div></div>
     <div class="question">
@@ -2652,6 +2670,15 @@
     resultsEl.classList.add("hidden");
     setupEl.classList.remove("hidden");
   });
+  // Quit an in-progress quiz and return to setup (no results, progress discarded).
+  function quitGame() {
+    if (!window.confirm("Quit this quiz? Your progress won't be saved.")) return;
+    stopTimer();
+    gameEl.classList.add("hidden");
+    resultsEl.classList.add("hidden");
+    setupEl.classList.remove("hidden");
+  }
+  $("quitBtn").addEventListener("click", quitGame);
   $("catalogToggle").addEventListener("click", () => {
     const panel = $("catalog");
     const hidden = panel.classList.toggle("hidden");
