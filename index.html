@@ -437,6 +437,41 @@
   .lb-score { font-weight: 800; color: var(--purple); }
 
   .hidden { display: none !important; }
+
+  /* ---------- Accessibility & display options ---------- */
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+  /* Larger text/UI — zoom scales everything proportionally, including inline sizes */
+  :root.a11y-large body { zoom: 1.18; }
+  /* Readable text — legible sans, generous spacing */
+  :root.a11y-dys, :root.a11y-dys button, :root.a11y-dys input, :root.a11y-dys .opt {
+    font-family: Verdana, "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+  }
+  :root.a11y-dys .q-text, :root.a11y-dys .opt, :root.a11y-dys .answer, :root.a11y-dys .lede, :root.a11y-dys p, :root.a11y-dys .h {
+    letter-spacing: .04em; word-spacing: .12em; line-height: 1.7;
+  }
+  /* High contrast — stronger text and focus */
+  :root.a11y-contrast .card { color: #000; }
+  :root.a11y-contrast .sub, :root.a11y-contrast .hint, :root.a11y-contrast .ed-hint, :root.a11y-contrast .cat-note { color: #2a2a2a !important; }
+  :root.a11y-contrast .opt { border-color: #333; }
+  :root.a11y-contrast .brand .tag { opacity: 1; }
+  :root.a11y-contrast a { text-decoration: underline; }
+  /* Always-visible keyboard focus, strengthened under high contrast */
+  .answer:focus-visible, .btn-primary:focus-visible, .btn-secondary:focus-visible, .opt:focus-visible, .catalog-toggle:focus-visible {
+    outline: 3px solid var(--purple); outline-offset: 2px;
+  }
+  :root.a11y-contrast :focus-visible { outline: 4px solid #000 !important; outline-offset: 2px; }
+  /* Reduce motion — cut decorative transitions/animations */
+  :root.a11y-reduce * { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
+
+  .a11y-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 14px; }
+  .a11y-opt {
+    border: 2px solid #ddd; background: #fff; color: #444; font-size: 13px; font-weight: 700;
+    padding: 8px 14px; border-radius: 999px; cursor: pointer; font-family: inherit;
+  }
+  .a11y-opt:hover { border-color: #bbb; }
+  .a11y-opt.on { background: var(--purple); border-color: var(--purple); color: #fff; }
+  .a11y-opt.on::before { content: "✓ "; }
+  .a11y-lbl { font-size: 12px; font-weight: 800; letter-spacing: .3px; text-transform: uppercase; color: #888; margin: 6px 0 2px; }
 </style>
 <!-- Firebase (cloud accounts). Loaded from CDN; if unreachable, the app runs in local-only mode. -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -447,19 +482,19 @@
 <div class="wrap">
   <div class="brand">
     <h1>MathHoot</h1>
-    <div class="tag">A Kahoot-style quiz, built for math.</div>
-    <div class="ai-badge">✨ Now with AI Integration</div>
+    <div class="tag" data-i18n="tag">A Kahoot-style quiz, built for math.</div>
+    <div class="ai-badge" data-i18n="aibadge">✨ Now with AI Integration</div>
   </div>
 
   <!-- ============ SETUP ============ -->
   <div id="setup" class="card">
     <div class="field">
-      <label class="h" for="player">Player name</label>
-      <input id="player" class="name-input" type="text" placeholder="Enter your name" maxlength="24" value="Player">
+      <label class="h" for="player"><span data-i18n="h.player">Player name</span></label>
+      <input id="player" class="name-input" type="text" placeholder="Enter your name" data-i18n-ph="ph.player" maxlength="24" value="Player">
     </div>
 
     <div class="field">
-      <label class="h">Topics <span class="hint">— pick at least one</span></label>
+      <label class="h"><span data-i18n="h.topics">Topics</span> <span class="hint">— pick at least one</span></label>
       <div class="opts" id="topics">
         <div class="opt sel" data-topic="arithmetic">Arithmetic <span class="sub">+ − × ÷</span></div>
         <div class="opt" data-topic="fractions">Fractions &amp; % <span class="sub">parts, percents</span></div>
@@ -475,7 +510,7 @@
     </div>
 
     <div class="field">
-      <label class="h">Question types <span class="hint">— pick one or more</span></label>
+      <label class="h"><span data-i18n="h.qtypes">Question types</span> <span class="hint">— pick one or more</span></label>
       <div class="opts" id="qtype">
         <div class="opt sel" data-qtype="numeric">Numerical <span class="sub">computation</span></div>
         <div class="opt" data-qtype="concept">Conceptual <span class="sub">definitions &amp; reasoning</span></div>
@@ -484,7 +519,7 @@
     </div>
 
     <div class="field">
-      <label class="h">Difficulty <span class="hint">— scales every topic</span></label>
+      <label class="h"><span data-i18n="h.difficulty">Difficulty</span> <span class="hint">— scales every topic</span></label>
       <div class="opts" id="difficulty">
         <div class="opt" data-diff="easy">Easy <span class="sub">intro</span></div>
         <div class="opt sel" data-diff="medium">Medium <span class="sub">standard</span></div>
@@ -506,7 +541,7 @@
     </div>
 
     <div class="field">
-      <label class="h">Pace <span class="hint">— time per question adapts to its topic &amp; difficulty</span></label>
+      <label class="h"><span data-i18n="h.pace">Pace</span> <span class="hint">— time per question adapts to its topic &amp; difficulty</span></label>
       <div class="opts" id="pace">
         <div class="opt" data-pace="1.6">Relaxed <span class="sub">more time</span></div>
         <div class="opt sel" data-pace="1">Standard <span class="sub">balanced</span></div>
@@ -516,7 +551,7 @@
     </div>
 
     <div class="field">
-      <label class="h">Scoring mode</label>
+      <label class="h"><span data-i18n="h.scoring">Scoring mode</span></label>
       <div class="scoring-opts" id="scoring">
         <div class="score-card sel" data-score="time">
           <div class="t">⚡ Time-based</div>
@@ -529,7 +564,10 @@
       </div>
     </div>
 
-    <button id="startBtn" class="btn-primary">Start game</button>
+    <button id="startBtn" class="btn-primary" data-i18n="btn.start">Start game</button>
+
+    <button id="a11yToggle" class="catalog-toggle" type="button" data-i18n="a11y.toggle">⚙️ Accessibility &amp; language</button>
+    <div id="a11yPanel" class="catalog hidden"></div>
 
     <button id="catalogToggle" class="catalog-toggle" type="button">📊 Show question catalog</button>
     <div id="catalog" class="catalog hidden"><div id="catalogBody"></div></div>
@@ -559,17 +597,17 @@
         <div class="pill" id="progress">Question 1 / 10</div>
         <div class="pill" id="scoreLabel">Score: 0</div>
       </div>
-      <button id="quitBtn" class="quit-btn" type="button" aria-label="Quit this quiz">✕ Quit</button>
+      <button id="quitBtn" class="quit-btn" type="button"><span aria-hidden="true">✕ </span><span data-i18n="btn.quit">Quit</span></button>
     </div>
     <div class="timer-track" id="timerTrack"><div class="timer-fill" id="timerFill"></div></div>
     <div class="question">
       <div class="q-num" id="qNum">Question 1</div>
       <div class="timer-big hidden" id="timerBig">10</div>
-      <div class="q-text" id="qText">3 × 4</div>
+      <div class="q-text" id="qText" aria-live="polite">3 × 4</div>
       <div class="q-sub" id="qSub"></div>
     </div>
-    <div class="answers" id="answers"></div>
-    <div class="feedback" id="feedback"></div>
+    <div class="answers" id="answers" role="group" aria-label="Answer choices"></div>
+    <div class="feedback" id="feedback" aria-live="assertive"></div>
   </div>
 
   <!-- ============ RESULTS ============ -->
@@ -579,12 +617,12 @@
       <div class="who" id="resWho">Player</div>
       <div class="big-score"><span id="resScore">0</span> <span class="unit" id="resUnit">pts</span></div>
       <div class="stats">
-        <div class="stat good"><div class="n" id="resCorrect">0</div><div class="l">Correct</div></div>
-        <div class="stat bad"><div class="n" id="resWrong">0</div><div class="l">Wrong</div></div>
-        <div class="stat"><div class="n" id="resAccuracy">0%</div><div class="l">Accuracy</div></div>
+        <div class="stat good"><div class="n" id="resCorrect">0</div><div class="l" data-i18n="res.correct">Correct</div></div>
+        <div class="stat bad"><div class="n" id="resWrong">0</div><div class="l" data-i18n="res.wrong">Wrong</div></div>
+        <div class="stat"><div class="n" id="resAccuracy">0%</div><div class="l" data-i18n="res.accuracy">Accuracy</div></div>
       </div>
       <div class="report" id="reportCard"></div>
-      <button id="againBtn" class="btn-secondary">Play again</button>
+      <button id="againBtn" class="btn-secondary" data-i18n="btn.again">Play again</button>
       <div class="review" id="review"></div>
     </div>
   </div>
@@ -605,6 +643,8 @@
     pace: 1,         // time multiplier; 0 = no limit
     scoring: "time", // "time" | "count"
     qtypes: ["numeric"], // multi-select: any of "numeric", "concept", "truefalse"
+    lang: "en",      // interface language: "en" | "es"
+    a11y: { contrast: false, large: false, dysfont: false, reduce: false },
   };
 
   // ---------- Cloud accounts (Firebase) ----------
@@ -1532,9 +1572,10 @@
     q.options.forEach((val, i) => {
       const b = document.createElement("button");
       b.className = "answer a" + i + (String(val).length > 14 ? " small" : "");
+      b.setAttribute("aria-label", String(val));
       const span = document.createElement("span");
       span.textContent = val;
-      b.innerHTML = '<span class="shape">' + SHAPES[i] + "</span>";
+      b.innerHTML = '<span class="shape" aria-hidden="true">' + SHAPES[i] + "</span>";
       b.appendChild(span);
       b.addEventListener("click", () => choose(i, b));
       ans.appendChild(b);
@@ -2000,9 +2041,68 @@
   function addHistory(entry) { const h = loadHistory().slice(); h.unshift(entry); if (h.length > 100) h.length = 100; saveHistory(h); }
   function loadPrefs() { return loggedIn() ? (cloudDoc.prefs || null) : loadLocal(PREFS_KEY, null); }
   function savePrefs(p) { saveLocal(PREFS_KEY, p); if (loggedIn()) { cloudDoc.prefs = p; scheduleCloudWrite(); } }
+  // ---------- Accessibility & interface language (i18n) ----------
+  const I18N = {
+    en: {
+      "tag": "A Kahoot-style quiz, built for math.",
+      "aibadge": "✨ Now with AI Integration",
+      "h.player": "Player name", "ph.player": "Enter your name",
+      "h.topics": "Topics", "h.qtypes": "Question types", "h.difficulty": "Difficulty",
+      "h.pace": "Pace", "h.scoring": "Scoring mode",
+      "btn.start": "Start game", "btn.quit": "Quit", "btn.again": "Play again",
+      "res.correct": "Correct", "res.wrong": "Wrong", "res.accuracy": "Accuracy",
+      "a11y.toggle": "⚙️ Accessibility & language",
+      "a11y.title": "Accessibility & language", "a11y.language": "Language",
+      "a11y.display": "Display", "a11y.contrast": "High contrast", "a11y.large": "Larger text",
+      "a11y.readable": "Readable text", "a11y.reduce": "Reduce motion",
+      "a11y.note": "Applies to the whole app and is saved on this device (and to your account if signed in). Question content stays in its original form.",
+    },
+    es: {
+      "tag": "Un cuestionario estilo Kahoot, hecho para matemáticas.",
+      "aibadge": "✨ Ahora con Integración de IA",
+      "h.player": "Nombre del jugador", "ph.player": "Escribe tu nombre",
+      "h.topics": "Temas", "h.qtypes": "Tipos de pregunta", "h.difficulty": "Dificultad",
+      "h.pace": "Ritmo", "h.scoring": "Modo de puntuación",
+      "btn.start": "Empezar juego", "btn.quit": "Salir", "btn.again": "Jugar de nuevo",
+      "res.correct": "Correctas", "res.wrong": "Incorrectas", "res.accuracy": "Precisión",
+      "a11y.toggle": "⚙️ Accesibilidad e idioma",
+      "a11y.title": "Accesibilidad e idioma", "a11y.language": "Idioma",
+      "a11y.display": "Pantalla", "a11y.contrast": "Alto contraste", "a11y.large": "Texto más grande",
+      "a11y.readable": "Texto legible", "a11y.reduce": "Reducir animación",
+      "a11y.note": "Se aplica a toda la app y se guarda en este dispositivo (y en tu cuenta si inicias sesión). El contenido de las preguntas permanece en su forma original.",
+    },
+  };
+  const LANG_NAME = { en: "English", es: "Español" };
+  function t(key) { const L = I18N[cfg.lang] || I18N.en; return (key in L) ? L[key] : (I18N.en[key] || key); }
+  function applyLang(lang) {
+    cfg.lang = (lang === "es") ? "es" : "en";
+    document.documentElement.lang = cfg.lang;
+    document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = t(el.dataset.i18n); });
+    document.querySelectorAll("[data-i18n-ph]").forEach((el) => { el.setAttribute("placeholder", t(el.dataset.i18nPh)); });
+    if (!$("a11yPanel").classList.contains("hidden")) renderA11yPanel();
+  }
+  function applyA11y() {
+    const r = document.documentElement, a = cfg.a11y || {};
+    r.classList.toggle("a11y-contrast", !!a.contrast);
+    r.classList.toggle("a11y-large", !!a.large);
+    r.classList.toggle("a11y-dys", !!a.dysfont);
+    r.classList.toggle("a11y-reduce", !!a.reduce);
+  }
+  const A11Y_OPTS = [["contrast", "a11y.contrast"], ["large", "a11y.large"], ["dysfont", "a11y.readable"], ["reduce", "a11y.reduce"]];
+  function renderA11yPanel() {
+    const a = cfg.a11y || {};
+    let html = '<div class="ed-head"><h4>' + escHtml(t("a11y.title")) + "</h4></div>";
+    html += '<div class="a11y-lbl">' + escHtml(t("a11y.language")) + "</div><div class=\"a11y-row\">" +
+      ["en", "es"].map((l) => '<button class="a11y-opt' + (cfg.lang === l ? " on" : "") + '" data-lang="' + l + '" type="button">' + escHtml(LANG_NAME[l]) + "</button>").join("") + "</div>";
+    html += '<div class="a11y-lbl">' + escHtml(t("a11y.display")) + "</div><div class=\"a11y-row\">" +
+      A11Y_OPTS.map((o) => '<button class="a11y-opt' + (a[o[0]] ? " on" : "") + '" data-a11y="' + o[0] + '" type="button">' + escHtml(t(o[1])) + "</button>").join("") + "</div>";
+    html += '<p class="ed-hint">' + escHtml(t("a11y.note")) + "</p>";
+    $("a11yPanel").innerHTML = html;
+  }
+
   // Preferences <-> setup UI.
   let _prefsReady = false;
-  function snapshotPrefs() { return { name: cfg.name, topics: cfg.topics.slice(), qtypes: cfg.qtypes.slice(), diff: cfg.diff, count: cfg.count, pace: cfg.pace, scoring: cfg.scoring }; }
+  function snapshotPrefs() { return { name: cfg.name, topics: cfg.topics.slice(), qtypes: cfg.qtypes.slice(), diff: cfg.diff, count: cfg.count, pace: cfg.pace, scoring: cfg.scoring, lang: cfg.lang, a11y: Object.assign({}, cfg.a11y) }; }
   function persistPrefs() { if (_prefsReady) savePrefs(snapshotPrefs()); }
   function setChips(containerId, attr, values) {
     const vals = (Array.isArray(values) ? values : [values]).map(String);
@@ -2017,6 +2117,10 @@
     if (p.count) { cfg.count = p.count; setChips("count", "count", p.count); }
     if (p.pace != null) { cfg.pace = p.pace; setChips("pace", "pace", p.pace); }
     if (p.scoring) { cfg.scoring = p.scoring; setChips("scoring", "score", p.scoring); }
+    if (p.lang) cfg.lang = p.lang;
+    if (p.a11y) cfg.a11y = Object.assign({ contrast: false, large: false, dysfont: false, reduce: false }, p.a11y);
+    applyLang(cfg.lang);
+    applyA11y();
     validate();
   }
 
@@ -2782,6 +2886,17 @@
     if (!hidden) { _lastAISet = null; renderAIPanel(); }
     $("aiToggle").textContent = hidden ? "✨ AI Integration — generate a set" : "✨ AI Integration — hide";
   });
+  // Accessibility & language panel
+  $("a11yToggle").addEventListener("click", () => {
+    const p = $("a11yPanel"); const hidden = p.classList.toggle("hidden");
+    if (!hidden) renderA11yPanel();
+  });
+  $("a11yPanel").addEventListener("click", (e) => {
+    const langBtn = e.target.closest("[data-lang]");
+    if (langBtn) { applyLang(langBtn.dataset.lang); persistPrefs(); renderA11yPanel(); return; }
+    const aBtn = e.target.closest("[data-a11y]");
+    if (aBtn) { const k = aBtn.dataset.a11y; cfg.a11y[k] = !cfg.a11y[k]; applyA11y(); persistPrefs(); renderA11yPanel(); }
+  });
   $("aiPanel").addEventListener("click", (e) => {
     const b = e.target.closest("[data-ai]"); if (!b) return;
     const act = b.dataset.ai;
@@ -2834,6 +2949,7 @@
   // Restore saved preferences (local); if a Firebase session is active, the auth
   // listener will load the cloud copy and override.
   applyPrefs(loadPrefs());
+  applyLang(cfg.lang); applyA11y(); // ensure language/accessibility apply even with no saved prefs
   _prefsReady = true;
   if (!firebaseReady) { $("acctToggle").classList.add("hidden"); }
   renderAccount();
