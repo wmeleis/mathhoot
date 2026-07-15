@@ -2371,7 +2371,9 @@
       (parsed.questions || []).forEach((q) => {
         const opts = (q.options || []).map((o) => String(o)).slice(0, 4);
         const c = Math.round(+q.correct);
-        if (opts.length === 4 && c >= 0 && c <= 3) qs.push({ text: String(q.text || "").slice(0, 240), options: opts, correct: c, explain: String(q.explain || "").slice(0, 300) });
+        // Require exactly 4 distinct, non-empty options and an in-range correct index,
+        // so the AI never produces duplicate/blank answer tiles.
+        if (opts.length === 4 && new Set(opts).size === 4 && opts.every((o) => o.trim()) && c >= 0 && c <= 3) qs.push({ text: String(q.text || "").slice(0, 240), options: opts, correct: c, explain: String(q.explain || "").slice(0, 300) });
       });
       if (!qs.length) throw new Error("The AI didn't return usable questions. Try rephrasing.");
       const name = "AI: " + prompt.slice(0, 40) + (prompt.length > 40 ? "…" : "");
